@@ -1,0 +1,49 @@
+# Cloud Build pipeline — alternative to GitHub Actions deploy
+# Trigger: gcloud builds submit --config infra/cloudbuild.yaml agentic-ai-server
+
+steps:
+  - name: Run tests
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        export PATH="$$HOME/.local/bin:$$PATH"
+        uv sync --all-groups
+        uv run ruff check .
+        uv run pytest -q -m "unit or orchestration or session or api or smoke" -k "not container"
+
+  - name: Build container
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/agentic-ai-server:${SHORT_SHA}
+      - .
+
+  - name: Push container
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/agentic-ai-server:${SHORT_SHA}
+
+  - name: Deploy to Cloud Run
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - agentic-ai-server
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/agentic-ai-server:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --set-secrets=GOOGLE_API_KEY=GOOGLE_API_KEY:latest
+      - --set-env-vars=APP_ENV=production,OTEL_ENABLED=true,TRACE_TO_CLOUD=true
+
+substitutions:
+  _REGION: us-central1
+  _REPOSITORY: agentic-ai-server
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/agentic-ai-server:${SHORT_SHA}

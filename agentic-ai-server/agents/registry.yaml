@@ -1,0 +1,42 @@
+# Top-level agents mounted automatically as REST endpoints.
+# Add a new agent by creating a handler module and listing it here.
+
+agents:
+  - id: echo
+    enabled: true
+    name: Echo Agent
+    description: Minimal ADK agent that echoes user input for smoke testing.
+    handler_module: agents.echo.handler
+    handler_class: create_agent_handler
+    adk:
+      model: gemini-2.0-flash
+      instruction: >
+        You are a helpful echo assistant. Repeat the user's message clearly
+        and add one brief, friendly sentence confirming you received it.
+
+  - id: chat_assistant
+    enabled: true
+    name: Chat Assistant
+    description: Chat-oriented multi-agent system (orchestrator, router, specialists, memory).
+    handler_module: agents.chat_assistant.handler
+    handler_class: create_agent_handler
+    manifest: agents/chat_assistant/manifest.yaml
+    type: agent_system
+    interaction_mode: conversational
+    conversation:
+      summarize_every_n_turns: 2
+      recent_turns_window: 2
+      max_summary_chars: 1500
+      persist_to_long_term_memory: true
+      checkpoint_on_close: true
+      search_long_term_memory: true
+
+  - id: claim_workflow
+    enabled: true
+    name: Claim Workflow
+    description: Workflow-oriented multi-agent system (sequential, parallel, retry, merge).
+    handler_module: agents.claim_workflow.handler
+    handler_class: create_agent_handler
+    manifest: agents/claim_workflow/manifest.yaml
+    type: agent_system
+    interaction_mode: stateless

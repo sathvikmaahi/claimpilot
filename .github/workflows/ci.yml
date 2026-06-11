@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "agentic-ai-server/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "agentic-ai-server/**"
+      - ".github/workflows/ci.yml"
+
+defaults:
+  run:
+    working-directory: agentic-ai-server
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: Mypy
+        run: uv run mypy app core api db telemetry agents tools
+
+      - name: Unit tests
+        run: uv run pytest -q -m "unit or orchestration or session or api"
+
+      - name: Smoke tests (app startup)
+        run: uv run pytest -q -m smoke -k "not container"
+        env:
+          OTEL_ENABLED: "false"
+          GOOGLE_API_KEY: ci-test-key
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build production image
+        working-directory: agentic-ai-server
+        run: docker build -t agentic-ai-server:ci .
+
+      - name: Container smoke test
+        working-directory: agentic-ai-server
+        run: |
+          docker run -d --name app -e OTEL_ENABLED=false -e GOOGLE_API_KEY=ci -p 8080:8080 agentic-ai-server:ci
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8080/health && break
+            sleep 2
+          done
+          curl -sf http://localhost:8080/ready
+          docker logs app
+          docker rm -f app

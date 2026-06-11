@@ -1,0 +1,64 @@
+id: chat_assistant
+name: Chat Assistant
+description: >
+  Chat-oriented multi-agent system with orchestrator, router, conversational
+  specialist, task worker, and session memory summarizer.
+
+model:
+  default: gemini-2.0-flash
+  temperature: 0.3
+
+safety:
+  max_turns: 20
+  blocked_topics:
+    - illegal_activity
+
+dependencies:
+  tools: []
+  services:
+    - session
+
+nodes:
+  orchestrator:
+    role: orchestrator
+    instruction: >
+      Classify the user's intent as either 'chat' for general conversation
+      or 'task' for actionable requests. Respond with structured route metadata.
+    output_key: route
+
+  intent_router:
+    role: router
+    instruction: Route to the appropriate specialist based on orchestrator output.
+
+  conversational:
+    role: conversational
+    instruction: >
+      Respond naturally and helpfully to the user's conversational message.
+    input_template: "User message: {user_message}\nOrchestrator notes: {orchestrator}"
+
+  task_worker:
+    role: task
+    instruction: >
+      Execute the user's actionable request step by step and return a concise result.
+    input_template: "Task request: {user_message}\nOrchestrator notes: {orchestrator}"
+
+  session_memory:
+    role: memory
+    instruction: >
+      Summarize the interaction in one sentence for session memory.
+    input_template: >
+      User: {user_message}
+      Latest response: {conversational}{task_worker}
+
+graph:
+  - type: sequential
+    steps:
+      - orchestrator
+      - type: router
+        source: orchestrator
+        field: route
+        routes:
+          chat: conversational
+          task: task_worker
+          default: conversational
+      - session_memory
