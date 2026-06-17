@@ -3,8 +3,8 @@ from dotenv import load_dotenv
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-load_dotenv("/Users/shubhangvangari/Documents/AI_fellowship/care-claim-repo/care-claim-ai/section_1_agent/.env")
-
+here = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(here, "..", "section_1_agent", ".env"))
 
 def _connect():
     """Open a fresh Cloud SQL connection."""
@@ -80,13 +80,54 @@ def load_context(medicaid_id: str) -> dict:
 
     return {
         "goals_text": goals_text,
+        "goals_raw": goals,         
         "medications": medications,
         "shift": shift,
-        "care_recipient_id": care_recipient_id,            # FK for the write
-        "shift_assignment_id": shift_row["shift_assignment_id"],  # FK for the write
+        "care_recipient_id": care_recipient_id,
+        "shift_assignment_id": shift_row["shift_assignment_id"]
     }
     
     
-if __name__ == "__main__":
-    import json
-    print(json.dumps(load_context("482910053"), indent=2))   # Marcus
+    
+def insert_care_session(row: dict) -> str:
+    """Insert one documented_care_sessions row. Returns the new care_session_id."""
+    conn = _connect()
+    cur = conn.cursor()
+
+    columns = list(row.keys())
+    placeholders = ", ".join(
+        "%s::uuid[]" if col == "goals_addressed_in_session" else "%s"
+        for col in columns
+    )
+    col_names = ", ".join(columns)
+
+    sql = f"""
+        insert into documented_care_sessions ({col_names})
+        values ({placeholders})
+        returning care_session_id;
+    """
+    cur.execute(sql, list(row.values()))
+    new_id = cur.fetchone()[0]
+
+    conn.commit()          # <-- writes are NOT saved until you commit
+    cur.close()
+    conn.close()
+    return str(new_id)
+
+
+def delete_care_session(care_session_id: str) -> None:
+    """Delete one care session by id (used for test cleanup)."""
+    conn = _connect()
+    cur = conn.cursor()
+    cur.execute(
+        "delete from documented_care_sessions where care_session_id = %s;",
+        (care_session_id,),
+    )
+    conn.commit()          # deletes, like inserts, aren't permanent until commit
+    cur.close()
+    conn.close()
+
+    
+# if __name__ == "__main__":
+#     import json
+#     print(json.dumps(load_context("482910053"), indent=2))   # Marcus

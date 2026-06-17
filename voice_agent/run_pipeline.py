@@ -1,4 +1,4 @@
-from database.db_context import load_context
+from database.db_context import load_context, insert_care_session
 from section_1_agent.agent import build_section1_agent
 from section_1_agent.detect_gaps import detect_gaps
 
@@ -76,37 +76,67 @@ async def run_section2(toggled):
         result[FIELD_TO_KEY[field]] = extraction["value"]
     return result
 
-
-def build_service_event_row(extraction: dict, ctx: dict) -> dict:
-    '''Takes the agent's final extractions + the DB context, and returns a service_events row dict.'''
-    s2 = extraction.get("extracted_fields_section2", {})
-    return {
-        # 3. Foreign keys — from context, not the voice
-        "individual_id": ctx["individual_id"],
-        "schedule_id": ctx["schedule_id"],
-
-        # 1. Rename / lift / copy
-        "service_description": extraction["transcript"],          # renamed
-        "activities_performed": extraction["activities_performed"], # copied
-        "support_level": extraction["support_level"],               # copied
-        "individual_response": extraction["individual_response"],   # copied
-        "health_observations": s2.get("health_observations"),       # lifted
-        "behavioral_observations": s2.get("behavioral_observations"),
-        "community_outing": s2.get("community_outing"),
-
-        # 2. Restructure — objects -> array of bare goal_id UUIDs
-        "goals_addressed": [g["goal_id"] for g in extraction["isp_goals_addressed"]],
-
-        # gaps we computed (A5 will formalize this column later)
-        "completeness_flags": extraction.get("gaps_detected", []),
-
-        # 4. Defaults for a finished shift
-        "status": "submitted",
-        "dsp_signed": True,
-        # begin_time, end_time, units_calculated, confidence_score, meals,
-        # personal_care, gps_* are intentionally omitted -> stay null (A5 / device / Section 3)
-    }
     
+def _resolve_goal_ids(model_goals, goals_raw):
+    """
+    Turn the model's matched goals into REAL goal_id UUIDs from the database.
+    Trust the model for WHICH goals (by category), never for the UUID itself.
+    """
+    resolved = []
+    for mg in model_goals:
+        model_cat = (mg.get("category") or "").lower()
+        for real in goals_raw:
+            real_cat = real["goal_category"].lower()
+            # tolerant match: "community" matches "community_integration",
+            # "health_safety" matches "health_and_safety", etc.
+            if real_cat.startswith(model_cat[:6]) or model_cat[:6] in real_cat:
+                resolved.append(real["goal_id"])
+                break
+    return list(dict.fromkeys(resolved))   # dedupe, keep order
+
+
+def build_care_session_row(extraction: dict, ctx: dict) -> dict:
+    """Map the Voice Extraction Object -> a documented_care_sessions row."""
+    s2 = extraction.get("extracted_fields_section2", {})
+
+    # support_level enum differs between the agent and the DB; translate it.
+    support_map = {
+        "independent": "independent",
+        "verbal": "verbal_prompts",
+        "physical": "physical_assistance",
+        "full": "full_support",
+        "unknown": None,
+    }
+
+    return {
+        # Foreign keys (from context, never the model)
+        "shift_assignment_id": ctx["shift_assignment_id"],
+        "care_recipient_id": ctx["care_recipient_id"],
+
+        # Section 1
+        "care_session_narrative": extraction["transcript"],
+        "activities_performed": extraction["activities_performed"],
+        "level_of_support_provided": support_map.get(extraction["support_level"]),
+        "recipient_engagement_notes": extraction["individual_response"],
+
+        # Section 2 (lifted from the nested object)
+        "health_observations_notes": s2.get("health_observations"),
+        "behavioral_observations_notes": s2.get("behavioral_observations"),
+        "community_outing_notes": s2.get("community_outing"),
+
+        # Goals — REAL UUIDs resolved from the DB, not the model's text
+        "goals_addressed_in_session": _resolve_goal_ids(
+            extraction.get("isp_goals_addressed", []), ctx["goals_raw"]
+        ),
+
+        # Gaps + confidence
+        "documentation_gap_flags": [g["message"] for g in extraction.get("gaps_detected", [])],
+        "ai_confidence_rating": extraction["confidence"].get("activities_performed", "Medium"),
+
+        # Status
+        "dsp_has_signed": True,
+        "session_status": "submitted_by_dsp",
+    }
 
 async def main():
     # execution flow:
@@ -136,12 +166,12 @@ async def main():
 
     print(json.dumps(section1, indent=2))
     
-    # with timed("DB write (insert)"):
-    #     row = build_service_event_row(section1, ctx)
-    #     saved = insert_service_event(row)
-        
-    # print("\n Wrote service_event:", saved["event_id"])
-
+    
+    row = build_care_session_row(section1, ctx)
+    new_id = insert_care_session(row)
+    print("\n Wrote care session:", new_id)
+    return new_id
+    
 
 if __name__ == "__main__":
     asyncio.run(main())
