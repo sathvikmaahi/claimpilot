@@ -1,4 +1,4 @@
-from db_context import load_context
+from database.db_context import load_context
 from section_1_agent.agent import build_section1_agent
 from section_1_agent.detect_gaps import detect_gaps
 
@@ -32,8 +32,8 @@ USER_ID = "dsp_maria" # DSP profile
 # Which observation toggles the DSP turned on, and the recording for each.
 # "behavioral" is deliberately left out — for noe
 TOGGLED = {
-    "health": "/Users/shubhangvangari/Documents/AI_fellowship/care-claim-repo/care-claim-ai/section_2_agent/section_2_health.m4a",
-    "outing": "/Users/shubhangvangari/Documents/AI_fellowship/care-claim-repo/care-claim-ai/section_2_agent/section_2_outing.m4a",
+    "health": "/Users/shubhangvangari/Documents/AI_fellowship/care-claim-repo/care-claim-ai/voice_agent/section_2_agent/section_2_health.m4a",
+    "outing": "/Users/shubhangvangari/Documents/AI_fellowship/care-claim-repo/care-claim-ai/voice_agent/section_2_agent/section_2_outing.m4a",
 }
 
 # these are the toggle options that will be presented to the DSP, in section 2
@@ -124,7 +124,7 @@ async def main():
     # Section 1 — agent built with John's real goals
     with timed("Section 1  (audio + LLM)"):
         section1_agent = build_section1_agent(ctx["goals_text"])
-        section1 = await run_agent_on_audio(section1_agent,  "/Users/shubhangvangari/Documents/AI_fellowship/care-claim-repo/care-claim-ai/section_1_agent/section1.m4a")
+        section1 = await run_agent_on_audio(section1_agent,  "/Users/shubhangvangari/Documents/AI_fellowship/care-claim-repo/care-claim-ai/voice_agent/section_1_agent/section1.m4a")
 
     # Gap detection — now fed the DB shift + meds
     section1["gaps_detected"] = detect_gaps(section1, ctx["shift"], ctx["medications"])
