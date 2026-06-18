@@ -103,16 +103,43 @@ async def _run_section2(toggled: dict[str, bytes]) -> dict:
     return result
 
 
-def _build_mar_scaffold(ctx: dict) -> list[dict]:
-    """
-    Placeholder for the MAR scaffold (fully populated in Stage 3, Commit 7).
+def _in_shift_window(med_time: str, shift: dict) -> bool:
+    """True if a med's scheduled time falls within the shift, inclusive.
+    Reuses the same window rule detect_gaps uses, so the MAR and the gap
+    flags agree on which meds are administrable this shift."""
+    def _t(hhmmss):
+        h, m, s = (int(x) for x in hhmmss.split(":"))
+        return h * 3600 + m * 60 + s
+    return _t(shift["start"]) <= _t(med_time) <= _t(shift["end"])
 
-    For now returns an empty list so extract()'s return SHAPE is stable — the
-    'mar_scaffold' key always exists, callers can rely on it, and Commit 7 only
-    has to fill it in (shift-window filtering + 'mentioned' hint) without changing
-    the contract.
+
+def _build_mar_scaffold(ctx: dict, transcript: str) -> list[dict]:
     """
-    return []
+    Build the MAR grid the frontend displays and the DSP taps to confirm.
+
+    - In-window meds only: a dose the DSP can't administer this shift isn't on
+      the MAR (same window rule as gap detection).
+    - JSON-safe and ID-free: medication_id is deliberately omitted — the client
+      never sees a UUID; write_mar re-resolves it by name server-side.
+    - 'mentioned_in_narration' is an advisory hint (the same transcript scan gap
+      detection uses), so the frontend can nudge the DSP. Nothing is pre-confirmed:
+      every dose defaults to unconfirmed and the DSP taps each one.
+    """
+    mentioned = any(w in (transcript or "").lower() for w in ("med", "medication", "pill"))
+    scaffold = []
+    for m in ctx["meds_raw"]:
+        sched = str(m["scheduled_time_of_day"])
+        if not _in_shift_window(sched, ctx["shift"]):
+            continue
+        scaffold.append({
+            "medication_name": m["medication_name"],
+            "dosage_amount": m["dosage_amount"],
+            "administration_route": m["administration_route"],
+            "scheduled_time": sched[:5],          # "07:00:00" -> "07:00"
+            "was_given": None,                    # unconfirmed until the DSP taps
+            "mentioned_in_narration": mentioned,  # advisory hint, not a decision
+        })
+    return scaffold
 
 
 async def extract(medicaid_id: str,
@@ -148,7 +175,7 @@ async def extract(medicaid_id: str,
     return {
         "auto_fields": ctx["auto_fields"],
         "progress_note": section1,
-        "mar_scaffold": _build_mar_scaffold(ctx),
+        "mar_scaffold": _build_mar_scaffold(ctx, section1.get("transcript", "")),
     }
     
     
