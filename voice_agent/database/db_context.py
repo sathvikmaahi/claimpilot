@@ -26,7 +26,8 @@ def load_context(medicaid_id: str) -> dict:
 
     # 1. Recipient — look up by medicaid_id, get the real primary key.
     cur.execute("""
-        select care_recipient_id, full_name, medicaid_id, waiver_program
+        select care_recipient_id, full_name, medicaid_id, waiver_program,
+               date_of_birth, primary_diagnosis_code
         from care_recipients
         where medicaid_id = %s;
     """, (medicaid_id,))
@@ -78,13 +79,29 @@ def load_context(medicaid_id: str) -> dict:
         "end": str(shift_row["scheduled_end_time"]),
     }
 
+    # Auto-fields: what the progress form pre-fills but the DSP never speaks.
+    # /extract returns these straight to the frontend to populate form Sections 1-2.
+    auto_fields = {
+        "recipient_name": recipient["full_name"],
+        "medicaid_id": recipient["medicaid_id"],
+        "date_of_birth": str(recipient["date_of_birth"]),
+        "primary_diagnosis_code": recipient["primary_diagnosis_code"],
+        "waiver_program": recipient["waiver_program"],
+        "service_location_name": shift_row["service_location_name"],
+        "dsp_name": shift_row["direct_support_professional_name"],
+        "scheduled_start_time": str(shift_row["scheduled_start_time"]),
+        "scheduled_end_time": str(shift_row["scheduled_end_time"]),
+        "service_billing_code": shift_row["service_billing_code"],
+    }
+
     return {
         "goals_text": goals_text,
-        "goals_raw": goals,         
+        "goals_raw": goals,
         "medications": medications,
         "shift": shift,
         "care_recipient_id": care_recipient_id,
-        "shift_assignment_id": shift_row["shift_assignment_id"]
+        "shift_assignment_id": shift_row["shift_assignment_id"],
+        "auto_fields": auto_fields,
     }
     
     
