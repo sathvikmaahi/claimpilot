@@ -45,7 +45,8 @@ def load_context(medicaid_id: str) -> dict:
 
     # 3. Active meds.
     cur.execute("""
-        select medication_name, dosage_amount, scheduled_time_of_day
+        select medication_id, medication_name, dosage_amount,
+               administration_route, scheduled_time_of_day
         from prescribed_medications
         where care_recipient_id = %s and is_currently_active = true
         order by scheduled_time_of_day;
@@ -97,7 +98,8 @@ def load_context(medicaid_id: str) -> dict:
     return {
         "goals_text": goals_text,
         "goals_raw": goals,
-        "medications": medications,
+        "medications": medications,   # simple list — gap detection consumes this
+        "meds_raw": meds,             # full rows incl. medication_id — MAR writer consumes this
         "shift": shift,
         "care_recipient_id": care_recipient_id,
         "shift_assignment_id": shift_row["shift_assignment_id"],
