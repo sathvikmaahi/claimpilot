@@ -14,3 +14,24 @@ class ExtractResponse(BaseModel):
     auto_fields: dict          # header the form pre-fills (name, DOB, hours, ...)
     progress_note: dict        # the LLM-authored editable note
     mar_scaffold: list[dict]   # the DB-prefilled med grid the DSP taps
+    
+    
+    
+class SubmitRequest(BaseModel):
+    """What POST /submit receives: the DSP-approved note, MAR taps, and signature data.
+
+    Inner shapes (progress_note, mar_grid items) are owned by pipeline.py and
+    validated lightly here — the model pins the envelope, the library owns the
+    contents. This matches the roadmap's 'validate lightly' for /submit.
+    """
+    medicaid_id: str
+    progress_note: dict          # the edited note (same shape as extract's progress_note)
+    mar_grid: list[dict] = []    # the DSP's per-med taps; empty if no in-window meds
+    meals: list[str] = []        # tap-only (form S10), never voiced
+    personal_care: list[str] = []  # tap-only (form S11), never voiced
+
+
+class SubmitResponse(BaseModel):
+    """What POST /submit returns after the atomic note + MAR write."""
+    care_session_id: str
+    mar_rows_written: int
