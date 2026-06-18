@@ -1,0 +1,15 @@
+[project]
+name = "care-claim-ai"
+version = "0.1.0"
+description = "ClaimPilot AI — Pipeline B: Claim Submission"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "pydantic>=2.8.2",
+    "uvicorn>=0.30.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
