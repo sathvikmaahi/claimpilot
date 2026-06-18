@@ -12,6 +12,7 @@ Stage 2 adds extract() — the read + LLM path. It performs NO database writes.
 import json
 import os
 import psycopg2
+import asyncio as _asyncio
 
 from google.adk.runners import InMemoryRunner
 from google.genai import types
@@ -49,13 +50,16 @@ async def _run_agent_on_audio(agent, audio_bytes: bytes, audio_mime: str = "audi
         role="user",
         parts=[types.Part.from_bytes(data=audio_bytes, mime_type=audio_mime)],
     )
-    text = None
-    async for event in runner.run_async(
-        user_id=USER_ID, session_id=session.id, new_message=message
-    ):
-        if event.is_final_response() and event.content:
-            text = event.content.parts[0].text
-    return json.loads(text)
+    async def _run():
+        text = None
+        async for event in runner.run_async(
+            user_id=USER_ID, session_id=session.id, new_message=message
+        ):
+            if event.is_final_response() and event.content:
+                text = event.content.parts[0].text
+        return json.loads(text)
+
+    return await _with_retry(_run)
 
 
 async def _run_section1(goals_text: str, narration_activities: bytes,
@@ -81,13 +85,17 @@ async def _run_section1(goals_text: str, narration_activities: bytes,
         parts.append(types.Part.from_bytes(data=narration_engagement, mime_type="audio/mp4"))
 
     message = types.Content(role="user", parts=parts)
-    text = None
-    async for event in runner.run_async(
-        user_id=USER_ID, session_id=session.id, new_message=message
-    ):
-        if event.is_final_response() and event.content:
-            text = event.content.parts[0].text
-    return json.loads(text)
+
+    async def _run():
+        text = None
+        async for event in runner.run_async(
+            user_id=USER_ID, session_id=session.id, new_message=message
+        ):
+            if event.is_final_response() and event.content:
+                text = event.content.parts[0].text
+        return json.loads(text)
+
+    return await _with_retry(_run)
 
 
 async def _run_section2(toggled: dict[str, bytes]) -> dict:
@@ -365,3 +373,37 @@ def write_session(approved: dict, mar_grid: list[dict] | None = None,
         raise
     finally:
         conn.close()
+        
+        
+        
+        
+
+_RETRYABLE_MARKERS = ("RESOURCE_EXHAUSTED", "429", "quota")
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    """True if the exception looks like a transient quota / rate-limit error.
+    Matches on message text rather than a specific class, so it's robust across
+    ADK/Gemini library versions."""
+    text = f"{type(exc).__name__} {exc}".lower()
+    return any(marker.lower() in text for marker in _RETRYABLE_MARKERS)
+
+
+async def _with_retry(coro_factory, *, attempts: int = 3, base_delay: float = 2.0):
+    """
+    Run an async operation, retrying ONLY on transient quota (429) errors with
+    exponential backoff. Any non-quota error raises immediately (so real bugs
+    aren't masked). Gives up after `attempts` tries.
+
+    coro_factory: a zero-arg callable returning a fresh coroutine each attempt
+    (we can't re-await a spent coroutine, so we rebuild it per try).
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return await coro_factory()
+        except Exception as exc:
+            if not _is_quota_error(exc) or attempt == attempts:
+                raise  # not retryable, or out of attempts -> surface it
+            delay = base_delay * (2 ** (attempt - 1))  # 2s, 4s, 8s
+            print(f"⚠  quota error (attempt {attempt}/{attempts}); retrying in {delay:.0f}s")
+            await _asyncio.sleep(delay)
