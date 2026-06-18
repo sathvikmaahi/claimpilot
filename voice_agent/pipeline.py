@@ -14,7 +14,7 @@ import json
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
-from database.db_context import load_context, insert_care_session
+from database.db_context import load_context, insert_care_session, insert_mar_rows
 from section_1_agent.agent import build_section1_agent
 from section_1_agent.detect_gaps import detect_gaps
 from section_2_agent.agent import build_section2_agent
@@ -225,3 +225,75 @@ def write_progress_note(approved: dict) -> str:
     ctx = load_context(approved["medicaid_id"])  # re-derive trustworthy values server-side
     row = _build_care_session_row(approved, ctx)
     return insert_care_session(row)
+
+
+# MAR exception codes (from the paper form) -> human-readable reason prefix.
+# The DB stores a free-text reason_if_not_given; the UI uses these short codes.
+_EXCEPTION_LABELS = {
+    "R": "Refused by recipient",
+    "O": "Omitted",
+    "H": "Hospitalized",
+    "SA": "Self-administered",
+}
+
+
+def _resolve_med_id(med_name: str, meds_raw: list) -> str:
+    """
+    Resolve a MAR entry's REAL medication_id from the DB by matching name.
+    Trust the client for WHICH med (by name) and what happened, never the UUID.
+    """
+    target = (med_name or "").strip().lower()
+    for real in meds_raw:
+        if real["medication_name"].strip().lower() == target:
+            return real["medication_id"]
+    raise ValueError(f"MAR entry names a medication not on this recipient's plan: {med_name!r}")
+
+
+def _build_mar_entries(mar_grid: list[dict], meds_raw: list) -> list[dict]:
+    """
+    Turn the DSP's tapped MAR grid into the rows insert_mar_rows expects.
+
+    Each grid item:
+      - medication_name  (what the DSP saw and tapped)
+      - was_given        (bool)
+      - admin_time       (timestamp, when given)
+      - exception_code   ("R"/"O"/"H"/"SA", only when not given)
+      - note             (optional free-text added to the reason)
+    """
+    entries = []
+    for item in mar_grid:
+        med_id = _resolve_med_id(item["medication_name"], meds_raw)
+        if item["was_given"]:
+            entries.append({
+                "medication_id": med_id,
+                "was_given": True,
+                "admin_time": item.get("admin_time"),
+                "reason_not_given": None,
+            })
+        else:
+            # Compose the stored reason from the exception code + optional note.
+            code = item.get("exception_code")
+            label = _EXCEPTION_LABELS.get(code, code or "Not given")
+            note = item.get("note")
+            reason = f"{label}: {note}" if note else label
+            entries.append({
+                "medication_id": med_id,
+                "was_given": False,
+                "admin_time": None,
+                "reason_not_given": reason,
+            })
+    return entries
+
+
+def write_mar(cur, care_session_id: str, medicaid_id: str, mar_grid: list[dict]) -> int:
+    """
+    Write the approved MAR grid as medication_administration_records rows.
+
+    Re-derives meds_raw (real medication_ids) from the DB, resolves each grid
+    entry's UUID by name server-side, translates exception codes into stored
+    reasons, and inserts via insert_mar_rows on the caller's cursor (shared
+    transaction with the progress note). Returns the row count.
+    """
+    ctx = load_context(medicaid_id)
+    entries = _build_mar_entries(mar_grid, ctx["meds_raw"])
+    return insert_mar_rows(cur, care_session_id, entries)
