@@ -190,6 +190,28 @@ def insert_mar_rows(cur, care_session_id: str, mar_entries: list[dict]) -> int:
             e.get("reason_not_given"),
         ))
     return len(mar_entries)
+
+
+def insert_care_session_cur(cur, row: dict) -> str:
+    """
+    Insert one documented_care_sessions row on a CALLER-PROVIDED cursor
+    (no own connection, no commit) so the note and its MAR rows share one
+    transaction. Returns the new care_session_id. The self-contained
+    insert_care_session is left untouched for existing callers/tests.
+    """
+    columns = list(row.keys())
+    placeholders = ", ".join(
+        "%s::uuid[]" if col == "goals_addressed_in_session" else "%s"
+        for col in columns
+    )
+    col_names = ", ".join(columns)
+    sql = f"""
+        insert into documented_care_sessions ({col_names})
+        values ({placeholders})
+        returning care_session_id;
+    """
+    cur.execute(sql, list(row.values()))
+    return str(cur.fetchone()[0])
     
 # if __name__ == "__main__":
 #     import json

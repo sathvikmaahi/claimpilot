@@ -10,11 +10,13 @@ Stage 2 adds extract() — the read + LLM path. It performs NO database writes.
 """
 
 import json
+import os
+import psycopg2
 
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
-from database.db_context import load_context, insert_care_session, insert_mar_rows
+from database.db_context import load_context, insert_care_session, insert_mar_rows, insert_care_session_cur
 from section_1_agent.agent import build_section1_agent
 from section_1_agent.detect_gaps import detect_gaps
 from section_2_agent.agent import build_section2_agent
@@ -324,3 +326,42 @@ def write_mar(cur, care_session_id: str, medicaid_id: str, mar_grid: list[dict])
     ctx = load_context(medicaid_id)
     entries = _build_mar_entries(mar_grid, ctx["meds_raw"])
     return insert_mar_rows(cur, care_session_id, entries)
+
+
+
+def write_session(approved: dict, mar_grid: list[dict] | None = None,
+                  meals: list[str] | None = None,
+                  personal_care: list[str] | None = None) -> dict:
+    """
+    Atomically persist a whole shift: the progress note AND its MAR rows in ONE
+    transaction. Either both commit or neither does — no orphan note, no orphan
+    MAR rows. This is what /submit calls.
+
+    - approved: the DSP-approved note (carries medicaid_id)
+    - mar_grid: the DSP's tapped MAR confirmations
+    - meals / personal_care: tap-only fields (form S10/S11), never voiced
+
+    Returns {care_session_id, mar_rows_written}.
+    """
+    mar_grid = mar_grid or []
+    ctx = load_context(approved["medicaid_id"])  # re-derive FKs/goal UUIDs server-side
+
+    row = _build_care_session_row(approved, ctx)
+    # Fold in the tap-only fields that don't come from voice.
+    row["meals_provided"] = meals or []
+    row["personal_care_activities"] = personal_care or []
+
+    conn = psycopg2.connect(
+        host=os.environ["CLOUD_SQL_HOST"], port=5432, dbname="claimpilot",
+        user="postgres", password=os.environ["CLOUD_SQL_PASSWORD"], sslmode="require")
+    try:
+        cur = conn.cursor()
+        care_session_id = insert_care_session_cur(cur, row)        # 1. note -> mints id
+        mar_count = write_mar(cur, care_session_id, approved["medicaid_id"], mar_grid)  # 2. MAR on same cursor
+        conn.commit()                                              # 3. both or neither
+        return {"care_session_id": care_session_id, "mar_rows_written": mar_count}
+    except Exception:
+        conn.rollback()   # any failure -> nothing persists
+        raise
+    finally:
+        conn.close()
