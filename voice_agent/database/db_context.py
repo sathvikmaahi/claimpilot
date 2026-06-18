@@ -146,6 +146,50 @@ def delete_care_session(care_session_id: str) -> None:
     cur.close()
     conn.close()
 
+
+
+def insert_mar_rows(cur, care_session_id: str, mar_entries: list[dict]) -> int:
+    """
+    Insert one medication_administration_records row per dose.
+
+    Works on a CALLER-PROVIDED cursor (does NOT open its own connection or commit)
+    so the MAR can share one transaction with the progress-note write — the note
+    and its MAR rows must commit together or not at all. The caller owns the
+    connection lifecycle and the commit.
+
+    Each entry in mar_entries:
+      - medication_id   (real UUID, resolved from the DB by the caller)
+      - was_given       (bool — True if administered)
+      - admin_time      (timestamp the dose was given, or None)
+      - reason_not_given (required string when was_given is False, else None)
+
+    Enforces the schema's reason_required_when_not_given rule BEFORE inserting,
+    so we fail fast with a clear error instead of a raw DB constraint violation.
+
+    Returns the number of rows inserted.
+    """
+    for e in mar_entries:
+        if not e["was_given"] and not e.get("reason_not_given"):
+            raise ValueError(
+                f"Medication {e['medication_id']} marked not given but no reason supplied; "
+                "a reason is required when a dose is not administered."
+            )
+
+    sql = """
+        insert into medication_administration_records
+            (care_session_id, medication_id, was_medication_given,
+             actual_administration_time, reason_if_not_given)
+        values (%s, %s, %s, %s, %s);
+    """
+    for e in mar_entries:
+        cur.execute(sql, (
+            care_session_id,
+            e["medication_id"],
+            e["was_given"],
+            e.get("admin_time"),
+            e.get("reason_not_given"),
+        ))
+    return len(mar_entries)
     
 # if __name__ == "__main__":
 #     import json
