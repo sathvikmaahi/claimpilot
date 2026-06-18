@@ -14,7 +14,7 @@ import json
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
-from database.db_context import load_context
+from database.db_context import load_context, insert_care_session
 from section_1_agent.agent import build_section1_agent
 from section_1_agent.detect_gaps import detect_gaps
 from section_2_agent.agent import build_section2_agent
@@ -150,3 +150,78 @@ async def extract(medicaid_id: str,
         "progress_note": section1,
         "mar_scaffold": _build_mar_scaffold(ctx),
     }
+    
+    
+
+
+def _resolve_goal_ids(model_goals, goals_raw):
+    """
+    Turn the model's matched goals into REAL goal_id UUIDs from the database.
+    Trust the model for WHICH goals (by category), never for the UUID itself.
+    """
+    resolved = []
+    for mg in model_goals:
+        model_cat = (mg.get("category") or "").lower()
+        for real in goals_raw:
+            real_cat = real["goal_category"].lower()
+            # tolerant match: "community" matches "community_integration",
+            # "health_safety" matches "health_and_safety", etc.
+            if real_cat.startswith(model_cat[:6]) or model_cat[:6] in real_cat:
+                resolved.append(real["goal_id"])
+                break
+    return list(dict.fromkeys(resolved))  # dedupe, keep order
+
+
+def _build_care_session_row(approved: dict, ctx: dict) -> dict:
+    """Map the approved note (Voice Extraction Object) -> a documented_care_sessions row."""
+    s2 = approved.get("extracted_fields_section2", {}) or {}
+
+    # support_level enum differs between the agent and the DB; translate it.
+    support_map = {
+        "independent": "independent",
+        "verbal": "verbal_prompts",
+        "physical": "physical_assistance",
+        "full": "full_support",
+        "unknown": None,
+    }
+
+    return {
+        # Foreign keys — re-derived from the DB, never from the client.
+        "shift_assignment_id": ctx["shift_assignment_id"],
+        "care_recipient_id": ctx["care_recipient_id"],
+
+        # Section 1 content (DSP may have edited these on screen).
+        "care_session_narrative": approved["transcript"],
+        "activities_performed": approved["activities_performed"],
+        "level_of_support_provided": support_map.get(approved["support_level"]),
+        "recipient_engagement_notes": approved["individual_response"],
+
+        # Section 2 observations.
+        "health_observations_notes": s2.get("health_observations"),
+        "behavioral_observations_notes": s2.get("behavioral_observations"),
+        "community_outing_notes": s2.get("community_outing"),
+
+        # Goals — REAL UUIDs resolved from the DB by category, not the model's text.
+        "goals_addressed_in_session": _resolve_goal_ids(
+            approved.get("isp_goals_addressed", []), ctx["goals_raw"]
+        ),
+
+        # Gaps + confidence.
+        "documentation_gap_flags": [g["message"] for g in approved.get("gaps_detected", [])],
+        "ai_confidence_rating": approved.get("confidence", {}).get("activities_performed", "Medium"),
+
+        # Status — the DSP has reviewed and signed.
+        "dsp_has_signed": True,
+        "session_status": "submitted_by_dsp",
+    }
+
+
+def write_progress_note(approved: dict) -> str:
+    """
+    The WRITE path for the progress note. Takes the DSP-approved note data
+    (carrying medicaid_id), re-derives foreign keys and goal UUIDs from the DB,
+    writes one documented_care_sessions row, and returns the new care_session_id.
+    """
+    ctx = load_context(approved["medicaid_id"])  # re-derive trustworthy values server-side
+    row = _build_care_session_row(approved, ctx)
+    return insert_care_session(row)
