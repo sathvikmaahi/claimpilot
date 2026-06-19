@@ -114,3 +114,41 @@ def test_is_quota_error_recognizes_429():
 
 def test_is_quota_error_ignores_real_bug():
     assert _is_quota_error(ValueError("bad audio format")) is False
+
+
+# ---------------------------------------------------------------------------
+# validate_goals_resolution — every goal resolved, note required if not addressed
+# ---------------------------------------------------------------------------
+
+from pipeline import validate_goals_resolution, IncompleteGoals
+
+_GOALS_RAW = [
+    {"goal_id": "g1", "goal_description": "Goal One"},
+    {"goal_id": "g2", "goal_description": "Goal Two"},
+]
+
+def test_goals_resolution_complete_and_valid_passes():
+    resolution = [
+        {"goal_id": "g1", "addressed": True, "note": ""},
+        {"goal_id": "g2", "addressed": False, "note": "no opportunity"},
+    ]
+    validate_goals_resolution(resolution, _GOALS_RAW)  # should not raise
+
+def test_goals_resolution_missing_goal_rejected():
+    import pytest
+    with pytest.raises(IncompleteGoals):
+        validate_goals_resolution([{"goal_id": "g1", "addressed": True}], _GOALS_RAW)
+
+def test_goals_resolution_not_addressed_without_note_rejected():
+    import pytest
+    with pytest.raises(IncompleteGoals):
+        validate_goals_resolution([
+            {"goal_id": "g1", "addressed": True},
+            {"goal_id": "g2", "addressed": False, "note": "   "},  # blank note
+        ], _GOALS_RAW)
+
+def test_goals_resolution_not_addressed_with_note_passes():
+    validate_goals_resolution([
+        {"goal_id": "g1", "addressed": False, "note": "busy"},
+        {"goal_id": "g2", "addressed": False, "note": "sick"},
+    ], _GOALS_RAW)  # should not raise
