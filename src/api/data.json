@@ -1,0 +1,68 @@
+[
+  {
+    "patient_name": "John Smith",
+    "insurance_number": "MO100001",
+    "patient_prior_auth_number": "AUTH-2026-00101",
+    "authorized_units": 96,
+    "validity_start_date": "2026-01-01",
+    "validity_end_date": "2026-12-31",
+    "authorized_service_code": "T2016",
+    "waiver_type": "Comprehensive",
+    "_scenario": "Valid auth — clean pass"
+  },
+  {
+    "patient_name": "Maria Garcia",
+    "insurance_number": "MO100002",
+    "patient_prior_auth_number": "AUTH-2026-00102",
+    "authorized_units": 0,
+    "validity_start_date": "2026-01-01",
+    "validity_end_date": "2026-12-31",
+    "authorized_service_code": "T2016",
+    "waiver_type": "Comprehensive",
+    "_scenario": "CO-151 fail — units exhausted"
+  },
+  {
+    "patient_name": "David Lee",
+    "insurance_number": "MO100003",
+    "patient_prior_auth_number": "AUTH-2025-00103",
+    "authorized_units": 48,
+    "validity_start_date": "2025-01-01",
+    "validity_end_date": "2025-12-31",
+    "authorized_service_code": "T2016",
+    "waiver_type": "Comprehensive",
+    "_scenario": "Check 1 fail — expired auth"
+  },
+  {
+    "patient_name": "Susan Brown",
+    "insurance_number": "MO100004",
+    "patient_prior_auth_number": "AUTH-2026-00104",
+    "authorized_units": 64,
+    "validity_start_date": "2026-01-01",
+    "validity_end_date": "2026-12-31",
+    "authorized_service_code": "T2021",
+    "waiver_type": "Comprehensive",
+    "_scenario": "Check 2 fail — service code mismatch"
+  },
+  {
+    "patient_name": "James Wilson",
+    "insurance_number": "MO100005",
+    "patient_prior_auth_number": "AUTH-2026-00105",
+    "authorized_units": 80,
+    "validity_start_date": "2026-01-01",
+    "validity_end_date": "2026-12-31",
+    "authorized_service_code": "T2016",
+    "waiver_type": "Partnership for Hope",
+    "_scenario": "Check 3 fail — waiver type mismatch"
+  },
+  {
+    "patient_name": "Linda Martinez",
+    "insurance_number": "MO100006",
+    "patient_prior_auth_number": "AUTH-2026-00106",
+    "authorized_units": 120,
+    "validity_start_date": "2026-01-01",
+    "validity_end_date": "2026-12-31",
+    "authorized_service_code": "T2016",
+    "waiver_type": "Comprehensive",
+    "_scenario": "Valid auth — clean pass (second patient)"
+  }
+]
