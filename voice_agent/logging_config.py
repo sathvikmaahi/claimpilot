@@ -1,0 +1,40 @@
+"""Centralized logging setup for the ClaimPilot voice agent.
+
+Configures structured, level-aware logging once. Every module gets its logger
+via get_logger(__name__). Logs are emitted at request edges only (request in,
+extract done, write done, errors) — enough to debug Cloud Run without noise.
+
+Reused unchanged by the image pipeline fork: same observability layer.
+"""
+
+import logging
+import sys
+
+_CONFIGURED = False
+
+
+def _configure() -> None:
+    global _CONFIGURED
+    if _CONFIGURED:
+        return
+    handler = logging.StreamHandler(sys.stdout)  # Cloud Run captures stdout
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s %(message)s"
+    ))
+    root = logging.getLogger("claimpilot")
+    root.setLevel(logging.INFO)
+    root.addHandler(handler)
+    root.propagate = False
+    _CONFIGURED = True
+
+
+def get_logger(name: str) -> logging.Logger:
+    """Return a configured logger under the 'claimpilot' namespace."""
+    _configure()
+    return logging.getLogger(f"claimpilot.{name}")
+
+
+def kv(**fields) -> str:
+    """Render key=value pairs for a structured log line.
+    e.g. kv(event='extract_done', goals=3) -> 'event=extract_done goals=3'."""
+    return " ".join(f"{k}={v}" for k, v in fields.items())

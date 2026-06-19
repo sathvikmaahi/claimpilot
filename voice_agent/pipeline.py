@@ -22,6 +22,9 @@ from section_1_agent.agent import build_section1_agent
 from section_1_agent.detect_gaps import detect_gaps
 from section_2_agent.agent import build_section2_agent
 
+from logging_config import get_logger, kv
+
+log = get_logger("pipeline")
 
 APP_NAME = "claimpilot_a2"
 USER_ID = "dsp_maria"  # DSP profile (single-user POC)
@@ -166,6 +169,7 @@ async def extract(medicaid_id: str,
       - mar_scaffold:   the DB-prefilled med grid the DSP taps to confirm (Stage 3)
     """
     toggled = toggled or {}
+    log.info(kv(event="extract_start", medicaid_id=medicaid_id, toggles=len(toggled)))
 
     # 1. One DB read for everything both documents need.
     ctx = load_context(medicaid_id)
@@ -182,11 +186,17 @@ async def extract(medicaid_id: str,
     section1["extracted_fields_section2"] = await _run_section2(toggled)
 
     # 5. Assemble the three blocks. progress_note is the whole Section 1 object.
-    return {
+    result = {
         "auto_fields": ctx["auto_fields"],
         "progress_note": section1,
         "mar_scaffold": _build_mar_scaffold(ctx, section1.get("transcript", "")),
     }
+    log.info(kv(event="extract_done", medicaid_id=medicaid_id,
+                activities=len(section1.get("activities_performed", [])),
+                goals=len(section1.get("isp_goals_addressed", [])),
+                gaps=len(section1.get("gaps_detected", [])),
+                mar_meds=len(result["mar_scaffold"])))
+    return result
     
     
 
@@ -365,11 +375,19 @@ def write_session(approved: dict, mar_grid: list[dict] | None = None,
     try:
         cur = conn.cursor()
         care_session_id = insert_care_session_cur(cur, row)        # 1. note -> mints id
+        log.info(kv(event="write_done", doc="PROGRESS_NOTE",
+                    care_session_id=care_session_id))
         mar_count = write_mar(cur, care_session_id, approved["medicaid_id"], mar_grid)  # 2. MAR on same cursor
+        log.info(kv(event="write_done", doc="MAR",
+                    care_session_id=care_session_id, rows=mar_count))
         conn.commit()                                              # 3. both or neither
+        log.info(kv(event="submit_committed", care_session_id=care_session_id,
+                    mar_rows=mar_count))
         return {"care_session_id": care_session_id, "mar_rows_written": mar_count}
-    except Exception:
+    except Exception as exc:
         conn.rollback()   # any failure -> nothing persists
+        log.error(kv(event="submit_failed", medicaid_id=approved.get("medicaid_id"),
+                     error=type(exc).__name__))
         raise
     finally:
         conn.close()
