@@ -22,7 +22,7 @@ from section_1_agent.agent import build_section1_agent
 from section_1_agent.detect_gaps import detect_gaps
 from section_2_agent.agent import build_section2_agent
 
-from logging_config import get_logger, kv
+from logging_config import get_logger, kv, timed
 
 log = get_logger("pipeline")
 
@@ -175,15 +175,17 @@ async def extract(medicaid_id: str,
     ctx = load_context(medicaid_id)
 
     # 2. Section 1 — WHAT + HOW into the verified agent.
-    section1 = await _run_section1(
-        ctx["goals_text"], narration_activities, narration_engagement
-    )
+    with timed("section1_llm", logger=log):
+        section1 = await _run_section1(
+            ctx["goals_text"], narration_activities, narration_engagement
+        )
 
     # 3. Gap detection — deterministic Python, fed the DB shift + meds.
     section1["gaps_detected"] = detect_gaps(section1, ctx["shift"], ctx["medications"])
 
     # 4. Section 2 — one narrow agent per toggle.
-    section1["extracted_fields_section2"] = await _run_section2(toggled)
+    with timed("section2_llm", logger=log):
+        section1["extracted_fields_section2"] = await _run_section2(toggled)
 
     # 5. Assemble the three blocks. progress_note is the whole Section 1 object.
     result = {
