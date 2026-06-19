@@ -6,6 +6,11 @@ from psycopg2.extras import RealDictCursor
 here = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(here, "..", "section_1_agent", ".env"))
 
+class NoShiftToday(Exception):
+    """Raised when a recipient has no shift scheduled for today.
+    A real, expected condition (not a bug) — callers can catch this and
+    return a clean response instead of a raw crash."""
+
 def _connect():
     """Open a fresh Cloud SQL connection."""
     return psycopg2.connect(
@@ -62,6 +67,16 @@ def load_context(medicaid_id: str) -> dict:
         where care_recipient_id = %s and shift_date = current_date;
     """, (care_recipient_id,))
     shift_row = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    # No shift dated today for this recipient — fail clearly, not with a raw
+    # NoneType crash. This is an expected condition a live app must handle.
+    if shift_row is None:
+        raise NoShiftToday(
+            f"No shift scheduled today for recipient with medicaid_id {medicaid_id}."
+        )
 
     cur.close()
     conn.close()
