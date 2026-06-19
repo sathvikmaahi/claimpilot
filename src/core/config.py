@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     database_url: str
     mock_auth_api_url: str
+    auth_api_timeout: float = 10.0
 
 
 settings = Settings()

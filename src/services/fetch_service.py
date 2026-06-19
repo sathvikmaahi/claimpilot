@@ -15,6 +15,7 @@ async def fetch_service_event(
     db: AsyncSession,
     http_client: httpx.AsyncClient,
     auth_api_url: str,
+    auth_api_timeout: float = 10.0,
 ) -> EnrichedServiceEvent:
     """
     Input: service_event_id (UUID), async DB session, httpx async client, auth API base URL.
@@ -59,7 +60,7 @@ async def fetch_service_event(
                 "patient_name": progress_note.participant_name,
                 "insurance_number": progress_note.participant_dcn,
             },
-            timeout=10.0,
+            timeout=auth_api_timeout,
         )
         response.raise_for_status()
         auth_data = response.json()

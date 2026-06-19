@@ -43,6 +43,7 @@ async def fetch_event(
             db=db,
             http_client=http_client,
             auth_api_url=settings.mock_auth_api_url,
+            auth_api_timeout=settings.auth_api_timeout,
         )
     except ServiceEventNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
