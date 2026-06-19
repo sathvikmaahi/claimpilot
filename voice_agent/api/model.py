@@ -29,6 +29,7 @@ class SubmitRequest(BaseModel):
     mar_grid: list[dict] = []    # the DSP's per-med taps; empty if no in-window meds
     meals: list[str] = []        # tap-only (form S10), never voiced
     personal_care: list[str] = []  # tap-only (form S11), never voiced
+    goals_resolution: list[dict] = []  # per-goal decision [{goal_id, addressed, note}]
 
 
 class SubmitResponse(BaseModel):

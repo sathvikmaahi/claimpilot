@@ -6,9 +6,9 @@ progress note and MAR rows in one atomic transaction. Thin HTTP adapter — the
 atomicity and UUID-resolution all live in pipeline.py.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
-from pipeline import write_session
+from pipeline import write_session, IncompleteGoals
 from api.model import SubmitRequest, SubmitResponse
 
 router = APIRouter()
@@ -23,9 +23,15 @@ def submit_route(req: SubmitRequest):
     approved["medicaid_id"] = req.medicaid_id
 
     # Call the verified atomic writer. Note + MAR commit together or not at all.
-    return write_session(
-        approved,
-        mar_grid=req.mar_grid,
-        meals=req.meals,
-        personal_care=req.personal_care,
-    )
+    # Call the verified atomic writer. Note + MAR commit together or not at all.
+    # IncompleteGoals -> a clean 400 so the DSP sees an actionable message.
+    try:
+        return write_session(
+            approved,
+            mar_grid=req.mar_grid,
+            meals=req.meals,
+            personal_care=req.personal_care,
+            goals_resolution=req.goals_resolution,
+        )
+    except IncompleteGoals as e:
+        raise HTTPException(status_code=400, detail=str(e))
