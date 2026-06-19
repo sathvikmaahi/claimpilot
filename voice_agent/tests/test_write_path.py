@@ -67,8 +67,16 @@ def test_full_pipeline_write():
             {"medication_name": m["medication_name"], "was_given": True}
             for m in result["mar_scaffold"]
         ]
-
-        out = write_session(approved, mar_grid=mar_grid, meals=["Lunch"], personal_care=[])
+        # Resolve every active goal — required by goal-enforcement validation,
+        # mirroring what a real DSP submission sends.
+        goals_resolution = [
+            {"goal_id": g["goal_id"], "addressed": True, "note": "covered in shift"}
+            for g in result["active_goals"]
+        ]
+        out = write_session(
+            approved, mar_grid=mar_grid, meals=["Lunch"], personal_care=[],
+            goals_resolution=goals_resolution,
+        )
         new_id = out["care_session_id"]
         assert new_id, "Pipeline did not return a care_session_id"
         print(f"  inserted care_session_id = {new_id}")
