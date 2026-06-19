@@ -249,8 +249,10 @@ def _resolve_goal_ids(model_goals, goals_raw):
     return list(dict.fromkeys(resolved))  # dedupe, keep order
 
 
-def _build_care_session_row(approved: dict, ctx: dict) -> dict:
+def _build_care_session_row(approved: dict, ctx: dict, goals_resolution: list[dict] | None = None) -> dict:
     """Map the approved note (Voice Extraction Object) -> a documented_care_sessions row."""
+    from psycopg2.extras import Json
+    goals_resolution = goals_resolution or []
     s2 = approved.get("extracted_fields_section2", {}) or {}
 
     # support_level enum differs between the agent and the DB; translate it.
@@ -262,36 +264,39 @@ def _build_care_session_row(approved: dict, ctx: dict) -> dict:
         "unknown": None,
     }
 
+    # The DSP's resolution is authoritative for which goals were addressed.
+    # Derive the flat uuid[] (addressed subset) from it, validating each id
+    # against the recipient's real active goals (never trust a client id blindly).
+    valid_goal_ids = {str(g["goal_id"]) for g in ctx["goals_raw"]}
+    addressed_ids = [
+        r["goal_id"] for r in goals_resolution
+        if r.get("addressed") and str(r.get("goal_id")) in valid_goal_ids
+    ]
+
     return {
         # Foreign keys — re-derived from the DB, never from the client.
         "shift_assignment_id": ctx["shift_assignment_id"],
         "care_recipient_id": ctx["care_recipient_id"],
-
         # Section 1 content (DSP may have edited these on screen).
         "care_session_narrative": approved["transcript"],
         "activities_performed": approved["activities_performed"],
         "level_of_support_provided": support_map.get(approved["support_level"]),
         "recipient_engagement_notes": approved["individual_response"],
-
         # Section 2 observations.
         "health_observations_notes": s2.get("health_observations"),
         "behavioral_observations_notes": s2.get("behavioral_observations"),
         "community_outing_notes": s2.get("community_outing"),
-
-        # Goals — REAL UUIDs resolved from the DB by category, not the model's text.
-        "goals_addressed_in_session": _resolve_goal_ids(
-            approved.get("isp_goals_addressed", []), ctx["goals_raw"]
-        ),
-
+        # Goals — addressed subset now comes from the DSP's resolution, not the AI match.
+        "goals_addressed_in_session": addressed_ids,
+        # Full per-goal decision (addressed yes/no + note) stored as jsonb.
+        "goals_resolution": Json(goals_resolution),
         # Gaps + confidence.
         "documentation_gap_flags": [g["message"] for g in approved.get("gaps_detected", [])],
         "ai_confidence_rating": approved.get("confidence", {}).get("activities_performed", "Medium"),
-
         # Status — the DSP has reviewed and signed.
         "dsp_has_signed": True,
         "session_status": "submitted_by_dsp",
     }
-
 
 def write_progress_note(approved: dict) -> str:
     """
@@ -379,7 +384,9 @@ def write_mar(cur, care_session_id: str, medicaid_id: str, mar_grid: list[dict])
 
 def write_session(approved: dict, mar_grid: list[dict] | None = None,
                   meals: list[str] | None = None,
-                  personal_care: list[str] | None = None) -> dict:
+                  personal_care: list[str] | None = None,
+                  goals_resolution: list[dict] | None = None) -> dict:
+    
     """
     Atomically persist a whole shift: the progress note AND its MAR rows in ONE
     transaction. Either both commit or neither does — no orphan note, no orphan
@@ -394,7 +401,7 @@ def write_session(approved: dict, mar_grid: list[dict] | None = None,
     mar_grid = mar_grid or []
     ctx = load_context(approved["medicaid_id"])  # re-derive FKs/goal UUIDs server-side
 
-    row = _build_care_session_row(approved, ctx)
+    row = _build_care_session_row(approved, ctx, goals_resolution or [])
     # Fold in the tap-only fields that don't come from voice.
     row["meals_provided"] = meals or []
     row["personal_care_activities"] = personal_care or []
