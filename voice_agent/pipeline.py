@@ -187,12 +187,14 @@ async def extract(medicaid_id: str,
     with timed("section2_llm", logger=log):
         section1["extracted_fields_section2"] = await _run_section2(toggled)
 
-    # 5. Assemble the three blocks. progress_note is the whole Section 1 object.
+    # 5. Assemble the response blocks. progress_note is the whole Section 1 object.
     result = {
         "auto_fields": ctx["auto_fields"],
         "progress_note": section1,
         "mar_scaffold": _build_mar_scaffold(ctx, section1.get("transcript", "")),
+        "active_goals": _build_active_goals(ctx, section1.get("isp_goals_addressed", [])),
     }
+    
     log.info(kv(event="extract_done", medicaid_id=medicaid_id,
                 activities=len(section1.get("activities_performed", [])),
                 goals=len(section1.get("isp_goals_addressed", [])),
@@ -201,7 +203,33 @@ async def extract(medicaid_id: str,
     return result
     
     
+def _build_active_goals(ctx: dict, matched_goals: list) -> list[dict]:
+    """Build the full active-goal list for the frontend's resolution checklist.
 
+    Returns EVERY active goal (not just AI-matched ones), so the DSP can
+    consciously resolve each. Goals the AI matched from the narration are
+    flagged ai_matched=True so the frontend can pre-check them; the DSP must
+    still resolve the rest. JSON-safe: goal_id is stringified.
+    """
+    # The categories the AI matched (its category labels, lowercased).
+    matched_cats = {(g.get("category") or "").lower() for g in matched_goals}
+
+    goals = []
+    for g in ctx["goals_raw"]:
+        real_cat = g["goal_category"].lower()
+        # ai_matched if any AI category prefix-matches this real category
+        # (same tolerant rule _resolve_goal_ids uses).
+        ai_matched = any(
+            real_cat.startswith(mc[:6]) or mc[:6] in real_cat
+            for mc in matched_cats if mc
+        )
+        goals.append({
+            "goal_id": str(g["goal_id"]),
+            "category": g["goal_category"],
+            "description": g["goal_description"],
+            "ai_matched": ai_matched,
+        })
+    return goals
 
 def _resolve_goal_ids(model_goals, goals_raw):
     """
