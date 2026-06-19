@@ -248,7 +248,52 @@ def _resolve_goal_ids(model_goals, goals_raw):
                 break
     return list(dict.fromkeys(resolved))  # dedupe, keep order
 
+class IncompleteGoals(Exception):
+    """Raised when the DSP's goal resolution doesn't cover every active goal,
+    or a not-addressed goal lacks the required note. A submission cannot be
+    saved until every goal is consciously resolved."""
 
+
+def validate_goals_resolution(goals_resolution: list[dict], goals_raw: list) -> None:
+    """Enforce that every active goal is consciously resolved.
+
+    Rules:
+      1. Every active goal must appear in goals_resolution (addressed true/false).
+      2. A goal marked addressed=False must carry a non-empty note.
+
+    Raises IncompleteGoals with a specific message if either rule is violated.
+    Pure function: no DB, no side effects — just policy.
+    """
+    resolution = goals_resolution or []
+
+    # Index the resolution by goal_id for lookup.
+    by_id = {str(r.get("goal_id")): r for r in resolution}
+
+    for g in goals_raw:
+        gid = str(g["goal_id"])
+        desc = g.get("goal_description", gid)
+
+        # Rule 1: every active goal must be resolved.
+        if gid not in by_id:
+            raise IncompleteGoals(
+                f"Goal not resolved: '{desc}'. Every goal must be marked "
+                "addressed or not addressed before submitting."
+            )
+
+        entry = by_id[gid]
+        if "addressed" not in entry:
+            raise IncompleteGoals(
+                f"Goal '{desc}' has no addressed decision (true/false)."
+            )
+
+        # Rule 2: not-addressed goals require a note.
+        if not entry["addressed"] and not (entry.get("note") or "").strip():
+            raise IncompleteGoals(
+                f"Goal '{desc}' is marked not addressed but has no note. "
+                "A reason is required when a goal is not addressed."
+            )
+            
+            
 def _build_care_session_row(approved: dict, ctx: dict, goals_resolution: list[dict] | None = None) -> dict:
     """Map the approved note (Voice Extraction Object) -> a documented_care_sessions row."""
     from psycopg2.extras import Json
@@ -305,7 +350,7 @@ def write_progress_note(approved: dict) -> str:
     writes one documented_care_sessions row, and returns the new care_session_id.
     """
     ctx = load_context(approved["medicaid_id"])  # re-derive trustworthy values server-side
-    row = _build_care_session_row(approved, ctx)
+    row = _build_care_session_row(approved, ctx, goals_resolution or [])
     return insert_care_session(row)
 
 
@@ -400,6 +445,8 @@ def write_session(approved: dict, mar_grid: list[dict] | None = None,
     """
     mar_grid = mar_grid or []
     ctx = load_context(approved["medicaid_id"])  # re-derive FKs/goal UUIDs server-side
+    # Enforce complete goal resolution BEFORE opening the write transaction.
+    validate_goals_resolution(goals_resolution or [], ctx["goals_raw"])
 
     row = _build_care_session_row(approved, ctx, goals_resolution or [])
     # Fold in the tap-only fields that don't come from voice.
