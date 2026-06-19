@@ -16,6 +16,8 @@ import asyncio as _asyncio
 
 from google.adk.runners import InMemoryRunner
 from google.genai import types
+from google.adk.agents.llm_agent import Agent
+
 
 from database.db_context import load_context, insert_care_session, insert_mar_rows, insert_care_session_cur
 from section_1_agent.agent import build_section1_agent
@@ -509,3 +511,70 @@ async def _with_retry(coro_factory, *, attempts: int = 3, base_delay: float = 2.
             delay = base_delay * (2 ** (attempt - 1))  # 2s, 4s, 8s
             print(f"⚠  quota error (attempt {attempt}/{attempts}); retrying in {delay:.0f}s")
             await _asyncio.sleep(delay)
+            
+            
+            
+# TRANSCRIPTION — (/transcribe)
+# ---------------------------------------------------------------------------
+# A stateless, write-free speech->text service. Used by the frontend for voice
+# notes (e.g. per-goal notes): audio in, plain text out. NO DB, no goals, no
+# extraction schema. The text reaches the DB only later, via /submit inside
+# goals_resolution — /transcribe itself saves nothing.
+
+
+def _build_transcription_agent() -> Agent:
+    """A schema-less agent that faithfully transcribes spoken audio to text.
+
+    Unlike the extractor agents, it returns PLAIN TEXT (no Pydantic schema) and
+    is told NOT to interpret, structure, or embellish — only to write down what
+    was said, lightly cleaning filler. Faithfulness matters: this can become a
+    clinical note supporting Medicaid billing, so no invented content.
+    """
+    return Agent(
+        model="gemini-2.5-flash",
+        name="transcription_agent",
+        description="Faithfully transcribes a short spoken note to text.",
+        instruction=(
+            "You are a transcription service. The user's message is spoken audio. "
+            "Write down exactly what was said, as clean readable text. "
+            "Lightly remove filler words and false starts (um, uh, repeated words), "
+            "but do NOT add, omit, summarize, interpret, or rephrase the content. "
+            "Return only the transcribed text — no preamble, no labels, no commentary."
+        ),
+        # NOTE: no output_schema — this agent returns plain text, not JSON.
+    )
+
+
+# Build once and reuse (the agent is identical for every note).
+_transcription_agent = _build_transcription_agent()
+
+
+async def transcribe(audio_bytes: bytes, audio_mime: str = "audio/mp4") -> str:
+    """Transcribe one audio clip to plain text. Stateless, no DB writes.
+
+    Reuses the same runner machinery as the extractors but, because the agent
+    is schema-less, reads the text directly (no json.loads). Wrapped in the
+    429 retry so a transient quota error retries like extraction does.
+    """
+    log.info(kv(event="transcribe_start", bytes=len(audio_bytes)))
+    runner = InMemoryRunner(agent=_transcription_agent, app_name=APP_NAME)
+    session = await runner.session_service.create_session(
+        app_name=APP_NAME, user_id=USER_ID
+    )
+    message = types.Content(
+        role="user",
+        parts=[types.Part.from_bytes(data=audio_bytes, mime_type=audio_mime)],
+    )
+
+    async def _run():
+        text = None
+        async for event in runner.run_async(
+            user_id=USER_ID, session_id=session.id, new_message=message
+        ):
+            if event.is_final_response() and event.content:
+                text = event.content.parts[0].text
+        return text
+
+    transcript = await _with_retry(_run)
+    log.info(kv(event="transcribe_done", chars=len(transcript or "")))
+    return (transcript or "").strip()

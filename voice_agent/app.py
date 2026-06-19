@@ -10,11 +10,12 @@ from dotenv import load_dotenv
 load_dotenv("section_1_agent/.env")  # load DB + Vertex creds before routes import
 
 from fastapi import FastAPI
-from api.routes import extract, submit
+from api.routes import extract, submit, transcribe
 
 app = FastAPI(title="ClaimPilot Voice Agent", version="0.1.0")
 app.include_router(extract.router)
 app.include_router(submit.router)
+app.include_router(transcribe.router)
 
 @app.get("/health")
 def health_check():

@@ -10,10 +10,12 @@ from pydantic import BaseModel
 
 
 class ExtractResponse(BaseModel):
-    """What POST /extract returns: the three blocks the frontend renders."""
+    """What POST /extract returns: the blocks the frontend renders."""
     auto_fields: dict          # header the form pre-fills (name, DOB, hours, ...)
     progress_note: dict        # the LLM-authored editable note
     mar_scaffold: list[dict]   # the DB-prefilled med grid the DSP taps
+    active_goals: list[dict]   # every active goal, for the resolution checklist
+ 
     
     
     
@@ -36,3 +38,8 @@ class SubmitResponse(BaseModel):
     """What POST /submit returns after the atomic note + MAR write."""
     care_session_id: str
     mar_rows_written: int
+    
+    
+class TranscribeResponse(BaseModel):
+    """What POST /transcribe returns: the transcribed text, nothing else."""
+    transcript: str
