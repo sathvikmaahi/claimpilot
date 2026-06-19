@@ -345,17 +345,6 @@ def _build_care_session_row(approved: dict, ctx: dict, goals_resolution: list[di
         "session_status": "submitted_by_dsp",
     }
 
-def write_progress_note(approved: dict) -> str:
-    """
-    The WRITE path for the progress note. Takes the DSP-approved note data
-    (carrying medicaid_id), re-derives foreign keys and goal UUIDs from the DB,
-    writes one documented_care_sessions row, and returns the new care_session_id.
-    """
-    ctx = load_context(approved["medicaid_id"])  # re-derive trustworthy values server-side
-    row = _build_care_session_row(approved, ctx, goals_resolution or [])
-    return insert_care_session(row)
-
-
 # MAR exception codes (from the paper form) -> human-readable reason prefix.
 # The DB stores a free-text reason_if_not_given; the UI uses these short codes.
 _EXCEPTION_LABELS = {
