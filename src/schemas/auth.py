@@ -1,25 +1,20 @@
 from datetime import date
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class AuthorizationRequest(BaseModel):
-    """
-    Input: patient_name (str), insurance_number (str).
-    Description: Request body sent to the mock Medicaid authorization API POST /authorization.
-                 insurance_number maps to participant_dcn from the progress_notes table.
-    Output: Used as the JSON body of the auth API POST request.
-    """
     patient_name: str
     insurance_number: str
 
+    @field_validator("patient_name", "insurance_number")
+    @classmethod
+    def must_not_be_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("must not be blank")
+        return v.strip()
+
 
 class AuthorizationDetails(BaseModel):
-    """
-    Input: JSON response from mock Medicaid authorization API.
-    Description: Prior authorization details returned by the auth API for a given patient.
-                 patient_prior_auth_number goes on the 837P as REF G1.
-    Output: Embedded in EnrichedServiceEvent.authorization field.
-    """
     patient_prior_auth_number: str
     authorized_units: int
     validity_start_date: date
