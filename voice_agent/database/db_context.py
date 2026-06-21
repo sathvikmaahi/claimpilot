@@ -231,3 +231,42 @@ def insert_care_session_cur(cur, row: dict) -> str:
 # if __name__ == "__main__":
 #     import json
 #     print(json.dumps(load_context("482910053"), indent=2))   # Marcus
+
+def load_roster(dsp_name: str) -> list[dict]:
+    """Return today's scheduled recipients for one DSP — the roster screen.
+
+    Queries staff_shift_assignments (the DSP->recipient assignment for today)
+    joined to care_recipients for display details. Returns ONLY the fields the
+    roster screen needs: who, where, when. Goals/meds/narrative come later via
+    /extract. Empty list if the DSP has no shifts today.
+    """
+    conn = _connect()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("""
+        select r.full_name        as recipient_name,
+               r.medicaid_id       as medicaid_id,
+               s.service_location_name,
+               s.scheduled_start_time,
+               s.scheduled_end_time
+        from staff_shift_assignments s
+        join care_recipients r
+          on r.care_recipient_id = s.care_recipient_id
+        where s.direct_support_professional_name = %s
+          and s.shift_date = current_date
+        order by s.scheduled_start_time;
+    """, (dsp_name,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    # JSON-safe: times come back as time objects.
+    return [
+        {
+            "recipient_name": row["recipient_name"],
+            "medicaid_id": row["medicaid_id"],
+            "service_location_name": row["service_location_name"],
+            "scheduled_start_time": str(row["scheduled_start_time"]),
+            "scheduled_end_time": str(row["scheduled_end_time"]),
+        }
+        for row in rows
+    ]

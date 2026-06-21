@@ -11,8 +11,7 @@ load_dotenv("section_1_agent/.env")  # load DB + Vertex creds before routes impo
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import extract, submit, transcribe
-
+from api.routes import extract, submit, transcribe, roster
 app = FastAPI(title="ClaimPilot Voice Agent", version="0.1.0")
 
 # CORS — lets a browser frontend (different origin) call this API.
@@ -28,6 +27,7 @@ app.add_middleware(
 app.include_router(extract.router)
 app.include_router(submit.router)
 app.include_router(transcribe.router)
+app.include_router(roster.router)
 
 @app.get("/health")
 def health_check():

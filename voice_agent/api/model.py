@@ -43,3 +43,8 @@ class SubmitResponse(BaseModel):
 class TranscribeResponse(BaseModel):
     """What POST /transcribe returns: the transcribed text, nothing else."""
     transcript: str
+
+class RosterResponse(BaseModel):
+    """What GET /get_roster returns: the DSP and their today recipients."""
+    dsp_name: str
+    recipients: list[dict]   # each: recipient_name, medicaid_id, location, hours
