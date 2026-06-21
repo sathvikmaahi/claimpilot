@@ -10,9 +10,21 @@ from dotenv import load_dotenv
 load_dotenv("section_1_agent/.env")  # load DB + Vertex creds before routes import
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from api.routes import extract, submit, transcribe
 
 app = FastAPI(title="ClaimPilot Voice Agent", version="0.1.0")
+
+# CORS — lets a browser frontend (different origin) call this API.
+# POC: allow all origins. TIGHTEN before production — restrict allow_origins
+# to the actual frontend URL(s), since this is a Medicaid/PHI app.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],          # POC only — replace with frontend origin(s) for prod
+    allow_credentials=False,      # must be False while allow_origins is "*"
+    allow_methods=["*"],          # GET, POST, OPTIONS, etc.
+    allow_headers=["*"],
+)
 app.include_router(extract.router)
 app.include_router(submit.router)
 app.include_router(transcribe.router)
