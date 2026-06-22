@@ -7,7 +7,7 @@ confirmed text later rides into /submit inside goals_resolution. Thin adapter.
 
 from fastapi import APIRouter, UploadFile, File
 
-from pipeline import transcribe
+from services.pipeline import transcribe
 from api.model import TranscribeResponse
 
 router = APIRouter()

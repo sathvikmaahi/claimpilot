@@ -11,12 +11,12 @@ import asyncio
 import pytest
 
 here = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(here, ".."))
+sys.path.insert(0, os.path.join(here, "..", ".."))
 
-from pipeline import transcribe
+from services.pipeline import transcribe
 
 # Adjust if your test clip lives elsewhere.
-CLIP = os.path.join(here, "..", "..", "transcript_test.m4a")
+CLIP = os.path.join(here, "..", "..", "..", "transcript_test.m4a")
 
 
 @pytest.mark.integration

@@ -16,8 +16,8 @@ Recipient context (active goals, medications, shift) is read from the database; 
 
 | Path | Role |
 |------|------|
-| `section_1_agent/` | The activity-narrative extractor (ADK agent). |
-| `section_2_agent/` | The single-observation extractor (ADK agent), called once per toggled topic. |
+| `narrative_extractor/` | The activity-narrative extractor (ADK agent). |
+| `observation_extractor/` | The single-observation extractor (ADK agent), called once per toggled topic. |
 | `database/` | Cloud SQL access (`db_context.py`) and the schema reference (`schema.sql`). |
 | `run_pipeline.py` | The orchestrator — loads context, runs the agents, assembles the result. |
 | `tests/` | Development and connection test scripts. |
@@ -34,7 +34,7 @@ Produces the complete Voice Extraction Object for the test recipient.
 
 **A single agent on its own** (useful while developing one section):
 
-    adk run section_1_agent
+    adk run narrative_extractor
 
 Then type or speak input when prompted; Ctrl+C to exit.
 

@@ -1,6 +1,6 @@
 # from database.db_context import load_context, insert_care_session
-# from section_1_agent.agent import build_section1_agent
-# from section_1_agent.detect_gaps import detect_gaps
+# from narrative_extractor.agent import build_narrative_extractor
+# from narrative_extractor.detect_gaps import detect_gaps
 
 
 # import asyncio
@@ -10,7 +10,7 @@
 # from google.adk.runners import InMemoryRunner
 # from google.genai import types
 
-# from section_2_agent.agent import build_section2_agent
+# from observation_extractor.agent import build_observation_extractor
 
 # import time
 # from contextlib import contextmanager
@@ -24,7 +24,7 @@
     
     
 
-# load_dotenv("section_1_agent/.env")   # load the .env 
+# load_dotenv("narrative_extractor/.env")   # load the .env 
 
 # APP_NAME = "claimpilot_a2"
 # USER_ID = "dsp_maria" # DSP profile
@@ -32,8 +32,8 @@
 # # Which observation toggles the DSP turned on, and the recording for each.
 # # "behavioral" is deliberately left out — for noe
 # TOGGLED = {
-#     "health": "/Users/shubhangvangari/Documents/AI_fellowship/care-claim-repo/care-claim-ai/voice_agent/section_2_agent/section_2_health.m4a",
-#     "outing": "/Users/shubhangvangari/Documents/AI_fellowship/care-claim-repo/care-claim-ai/voice_agent/section_2_agent/section_2_outing.m4a",
+#     "health": "/Users/shubhangvangari/Documents/AI_fellowship/care-claim-repo/care-claim-ai/voice_agent/observation_extractor/section_2_health.m4a",
+#     "outing": "/Users/shubhangvangari/Documents/AI_fellowship/care-claim-repo/care-claim-ai/voice_agent/observation_extractor/section_2_outing.m4a",
 # }
 
 # # these are the toggle options that will be presented to the DSP, in section 2
@@ -71,7 +71,7 @@
 #     '''Instead of building one agent for the entire Section 2, on the fly spearate agents are built for each toggled feid'''
 #     result = {key: None for key in FIELD_TO_KEY.values()}   # everything off by default
 #     for field, audio_path in toggled.items():
-#         agent = build_section2_agent(field)                 # build the agent for THIS field
+#         agent = build_observation_extractor(field)                 # build the agent for THIS field
 #         extraction = await run_agent_on_audio(agent, audio_path)
 #         result[FIELD_TO_KEY[field]] = extraction["value"]
 #     return result
@@ -153,8 +153,8 @@
 
 #     # Section 1 — agent built with John's real goals
 #     with timed("Section 1  (audio + LLM)"):
-#         section1_agent = build_section1_agent(ctx["goals_text"])
-#         section1 = await run_agent_on_audio(section1_agent,  "/Users/shubhangvangari/Documents/AI_fellowship/care-claim-repo/care-claim-ai/voice_agent/section_1_agent/section1.m4a")
+#         narrative_extractor = build_narrative_extractor(ctx["goals_text"])
+#         section1 = await run_agent_on_audio(narrative_extractor,  "/Users/shubhangvangari/Documents/AI_fellowship/care-claim-repo/care-claim-ai/voice_agent/narrative_extractor/section1.m4a")
 
 #     # Gap detection — now fed the DB shift + meds
 #     section1["gaps_detected"] = detect_gaps(section1, ctx["shift"], ctx["medications"])
@@ -182,17 +182,17 @@ import json
 
 from dotenv import load_dotenv
 
-from pipeline import extract, write_session
-from database.db_context import delete_care_session
+from services.pipeline import extract, write_session
+from db.db_context import delete_care_session
 
-load_dotenv("section_1_agent/.env")
+load_dotenv("agents/narrative_extractor/.env")
 
 # Local demo inputs — Marcus, with his narration and toggled observation clips.
 MARCUS_MEDICAID_ID = "482910053"
-NARRATION_ACTIVITIES = "section_1_agent/section1.m4a"
+NARRATION_ACTIVITIES = "agents/narrative_extractor/section1.m4a"
 TOGGLED_FILES = {
-    "health": "section_2_agent/section_2_health.m4a",
-    "outing": "section_2_agent/section_2_outing.m4a",
+    "health": "agents/observation_extractor/section_2_health.m4a",
+    "outing": "agents/observation_extractor/section_2_outing.m4a",
 }
 
 

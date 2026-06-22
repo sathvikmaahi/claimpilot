@@ -5,17 +5,17 @@ import pytest
 
 # Make voice_agent/ importable no matter where we run from
 here = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(here, ".."))
+sys.path.insert(0, os.path.join(here, "..", ".."))
 
-from pipeline import extract, write_session
-from database.db_context import _connect, delete_care_session
+from services.pipeline import extract, write_session
+from db.db_context import _connect, delete_care_session
 from psycopg2.extras import RealDictCursor
 
 MARCUS_MEDICAID_ID = "482910053"
 
 
 def _read(path):
-    with open(os.path.join(here, "..", path), "rb") as f:
+    with open(os.path.join(here, "..", "..", "agents", path), "rb") as f:
         return f.read()
 
 
@@ -57,7 +57,7 @@ def test_full_pipeline_write():
         # 1. Extract (calls Gemini — slow, uses quota), then submit.
         result = asyncio.run(extract(
             medicaid_id=MARCUS_MEDICAID_ID,
-            narration_activities=_read("section_1_agent/section1.m4a"),
+            narration_activities=_read("narrative_extractor/section1.m4a"),
             narration_engagement=None,
             toggled={},
         ))

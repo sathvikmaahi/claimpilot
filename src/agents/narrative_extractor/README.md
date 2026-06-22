@@ -1,4 +1,4 @@
-# Section 1 Agent — Activity Narrative Extractor
+# Narrative Extractor
 
 An ADK agent that reads a DSP's single spoken shift narration and returns structured activity documentation.
 
@@ -18,7 +18,7 @@ One voice recording (or text) describing the shift: what activities happened, ro
 
 ## Notes
 
-- Goals are supplied at build time from the database, via `build_section1_agent(goals_text)` — the agent is not hardcoded to any recipient.
+- Goals are supplied at build time from the database, via `build_narrative_extractor(goals_text)` — the agent is not hardcoded to any recipient.
 - Gap detection (e.g. an unmentioned scheduled medication) is **not** done here. It runs in deterministic Python (`detect_gaps.py`) after extraction, because the shift-window logic must be exact.
 
 ## Files

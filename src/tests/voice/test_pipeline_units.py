@@ -9,9 +9,9 @@ import os
 import sys
 
 here = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(here, ".."))
+sys.path.insert(0, os.path.join(here, "..", ".."))
 
-from pipeline import (
+from services.pipeline import (
     _in_shift_window,
     _resolve_goal_ids,
     _resolve_med_id,
@@ -120,7 +120,7 @@ def test_is_quota_error_ignores_real_bug():
 # validate_goals_resolution — every goal resolved, note required if not addressed
 # ---------------------------------------------------------------------------
 
-from pipeline import validate_goals_resolution, IncompleteGoals
+from services.pipeline import validate_goals_resolution, IncompleteGoals
 
 _GOALS_RAW = [
     {"goal_id": "g1", "goal_description": "Goal One"},

@@ -2,6 +2,8 @@ from google.adk.agents.llm_agent import Agent
 from pydantic import BaseModel, Field
 from typing import Literal
 
+from agents.prompts import load_prompt
+
 
 class ActivityTime(BaseModel):
     activity: str = Field(description="The activity")
@@ -21,7 +23,7 @@ class Confidence(BaseModel):
     individual_response: Literal["High", "Medium", "Low"]
 
 
-class Section1(BaseModel):
+class NarrativeExtraction(BaseModel):
     transcript: str = Field(description="Faithful transcription of the narration")
     activities_performed: list[str] = Field(
         description="Each distinct activity the DSP did with the individual")
@@ -38,26 +40,16 @@ class Section1(BaseModel):
         description="Honest High/Medium/Low confidence for each field")
 
 
-def build_section1_agent(goals_text: str) -> Agent:
-    """Build the Section 1 agent with goals supplied at call time (from the DB)."""
+def build_narrative_extractor(goals_text: str) -> Agent:
+    """Build the narrative extractor with goals supplied at call time (from the DB)."""
     return Agent(
         model="gemini-2.5-flash",
-        name="section1_agent",
-        description="Extracts structured Section 1 activity data from a DSP shift narration.",
-        instruction=(
-            "You extract structured documentation from a Direct Support Professional's "
-            "shift narration (spoken audio or text). The user's message IS the narration. "
-            "Extract only what is actually said — never invent details. "
-            "If a time is approximate ('around ten'), prefix it with '~'. "
-            "If the support level isn't inferable, use 'unknown'.\n\n"
-            "Map activities to the individual's ACTIVE ISP GOALS below, but ONLY when the "
-            "narration gives clear evidence. Do not map vague mentions. If nothing clearly "
-            "maps, return an empty list.\n"
-            "ACTIVE ISP GOALS:\n" + goals_text
-        ),
-        output_schema=Section1,
+        name="narrative_extractor",
+        description="Extracts structured activity-narrative data from a DSP shift narration.",
+        instruction=load_prompt("narrative_extractor").format(goals_text=goals_text),
+        output_schema=NarrativeExtraction,
     )
 
 
-# Default instance keeps the folder discoverable for `adk run section1_agent`.
-root_agent = build_section1_agent("(no goals loaded)")
+# Default instance keeps the folder discoverable for `adk run narrative_extractor`.
+root_agent = build_narrative_extractor("(no goals loaded)")

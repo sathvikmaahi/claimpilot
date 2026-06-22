@@ -49,10 +49,10 @@ def timed(label: str, logger=None):
     """Measure how long a block takes and emit it as a structured timing log.
 
     Usage:
-        with timed("section1_llm"):
+        with timed("narrative_llm"):
             ...slow work...
 
-    Logs: event=timing label=section1_llm seconds=11.24
+    Logs: event=timing label=narrative_llm seconds=11.24
     Replaces the old print-based helper so timings join the structured log
     stream (visible/filterable on Cloud Run), not bare stdout.
     """

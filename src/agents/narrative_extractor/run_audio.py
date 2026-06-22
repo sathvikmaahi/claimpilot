@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
-from agent import root_agent  # the Section 1 extractor you already built
+from agents.narrative_extractor.agent import root_agent  # the narrative extractor you already built
 
 load_dotenv()  # loads GOOGLE_API_KEY from the .env in this folder
 
@@ -53,7 +53,7 @@ async def main():
     ):
         if event.is_final_response() and event.content:
             import json
-            from section_1_agent.detect_gaps  import detect_gaps
+            from agents.narrative_extractor.detect_gaps  import detect_gaps
             extraction = json.loads(event.content.parts[0].text)
             extraction["gaps_detected"] = detect_gaps(extraction)
             print(json.dumps(extraction, indent=2))

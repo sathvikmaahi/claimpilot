@@ -8,7 +8,7 @@ pipeline.extract(). No business logic lives here — this is a thin HTTP adapter
 from fastapi import APIRouter, UploadFile, File, Form
 from typing import Optional
 
-from pipeline import extract
+from services.pipeline import extract
 from api.model import ExtractResponse
 
 router = APIRouter()

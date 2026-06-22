@@ -19,12 +19,12 @@ from google.genai import types
 from google.adk.agents.llm_agent import Agent
 
 
-from database.db_context import load_context, insert_care_session, insert_mar_rows, insert_care_session_cur
-from section_1_agent.agent import build_section1_agent
-from section_1_agent.detect_gaps import detect_gaps
-from section_2_agent.agent import build_section2_agent
+from db.db_context import load_context, insert_care_session, insert_mar_rows, insert_care_session_cur
+from agents.narrative_extractor.agent import build_narrative_extractor
+from agents.narrative_extractor.detect_gaps import detect_gaps
+from agents.observation_extractor.agent import build_observation_extractor
 
-from logging_config import get_logger, kv, timed
+from core.observability import get_logger, kv, timed
 
 log = get_logger("pipeline")
 
@@ -79,7 +79,7 @@ async def _run_section1(goals_text: str, narration_activities: bytes,
     is optional: a single combined recording (engagement=None) is fully supported,
     because the agent extracts both signals from whatever audio it's given.
     """
-    agent = build_section1_agent(goals_text)
+    agent = build_narrative_extractor(goals_text)
     runner = InMemoryRunner(agent=agent, app_name=APP_NAME)
     session = await runner.session_service.create_session(
         app_name=APP_NAME, user_id=USER_ID
@@ -112,7 +112,7 @@ async def _run_section2(toggled: dict[str, bytes]) -> dict:
     """
     result = {key: None for key in FIELD_TO_KEY.values()}  # everything off by default
     for field, audio_bytes in toggled.items():
-        agent = build_section2_agent(field)  # build the agent for THIS field
+        agent = build_observation_extractor(field)  # build the agent for THIS field
         extraction = await _run_agent_on_audio(agent, audio_bytes)
         result[FIELD_TO_KEY[field]] = extraction["value"]
     return result
@@ -177,7 +177,7 @@ async def extract(medicaid_id: str,
     ctx = load_context(medicaid_id)
 
     # 2. Section 1 — WHAT + HOW into the verified agent.
-    with timed("section1_llm", logger=log):
+    with timed("narrative_llm", logger=log):
         section1 = await _run_section1(
             ctx["goals_text"], narration_activities, narration_engagement
         )
@@ -186,7 +186,7 @@ async def extract(medicaid_id: str,
     section1["gaps_detected"] = detect_gaps(section1, ctx["shift"], ctx["medications"])
 
     # 4. Section 2 — one narrow agent per toggle.
-    with timed("section2_llm", logger=log):
+    with timed("observation_llm", logger=log):
         section1["extracted_fields_section2"] = await _run_section2(toggled)
 
     # 5. Assemble the response blocks. progress_note is the whole Section 1 object.

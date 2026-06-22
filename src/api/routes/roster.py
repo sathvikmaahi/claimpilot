@@ -7,7 +7,7 @@ display fields (who, where, when). The DSP is identified by name for the POC
 
 from fastapi import APIRouter
 
-from database.db_context import load_roster
+from db.db_context import load_roster
 from api.model import RosterResponse
 
 router = APIRouter()

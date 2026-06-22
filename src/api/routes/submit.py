@@ -8,7 +8,7 @@ atomicity and UUID-resolution all live in pipeline.py.
 
 from fastapi import APIRouter, HTTPException
 
-from pipeline import write_session, IncompleteGoals
+from services.pipeline import write_session, IncompleteGoals
 from api.model import SubmitRequest, SubmitResponse
 
 router = APIRouter()

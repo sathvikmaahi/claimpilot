@@ -9,4 +9,4 @@ import os
 from dotenv import load_dotenv
 
 here = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(here, "..", "section_1_agent", ".env"))
+load_dotenv(os.path.join(here, "..", "..", "agents", "narrative_extractor", ".env"))
