@@ -160,3 +160,108 @@ This approach ensures that the system improves productivity while maintaining ac
 The goal of CareClaim AI is to create an intelligent care documentation and claim preparation assistant that helps healthcare teams move from fragmented nurse inputs to structured nurse notes and claim-ready submissions.
 
 By combining voice, image, and text understanding with agentic AI orchestration, the solution can streamline the documentation-to-claim workflow and help healthcare teams improve speed, quality, and consistency across the claims lifecycle.
+
+---
+
+## Implementation Status
+
+### Pipeline B — Clerk Assistance Pipeline
+
+| Step | Description | Status |
+|------|-------------|--------|
+| Step 1 — Fetch | Pull service event from Pipeline A DB + call Medicaid auth API | Done |
+| Step 2 — Validate | 5 validation checks (auth, service code, waiver, EVV, completeness) | Pending |
+| Step 3 — Claim Builder | Google ADK + Gemini 2.5 Pro agent → 837P EDI mapping | Pending |
+| Step 4 — Clerk Review | Two-panel review UI → final 837P output | Pending |
+
+### Mock Medicaid Authorization API
+
+Simulates a real Medicaid prior authorization lookup. Supports 6 test patients covering different scenarios (valid auth, expired auth, units exhausted, code mismatch, waiver mismatch).
+
+---
+
+## Running Locally
+
+**Prerequisites:** Python 3.12+, Docker, [uv](https://docs.astral.sh/uv/)
+
+**1. Start the database**
+```bash
+cd src
+docker compose up -d
+```
+
+**2. Install dependencies**
+```bash
+cd src
+uv sync
+```
+
+**3. Configure environment**
+```bash
+cp .env.example .env
+# .env is pre-configured for local Docker — no changes needed
+```
+
+**4. Seed Pipeline A data**
+```bash
+cd src
+uv run python scripts/seed_pipeline_a.py
+```
+
+**5. Start the API**
+```bash
+cd src
+uv run uvicorn main:app --reload
+```
+
+Swagger UI available at `http://localhost:8000/docs`
+
+---
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Health check |
+| POST | `/authorization` | Mock Medicaid auth lookup |
+| GET | `/api/v1/fetch/{service_event_id}` | Step 1 — fetch and enrich service event |
+
+**Test patient UUIDs:**
+
+| Patient | UUID | Scenario |
+|---------|------|----------|
+| John Smith | `11111111-1111-1111-1111-111111111111` | Clean pass |
+| Maria Garcia | `22222222-2222-2222-2222-222222222222` | Units exhausted |
+| David Lee | `33333333-3333-3333-3333-333333333333` | Expired auth |
+| Susan Brown | `44444444-4444-4444-4444-444444444444` | Service code mismatch |
+| James Wilson | `55555555-5555-5555-5555-555555555555` | Waiver mismatch |
+| Linda Martinez | `66666666-6666-6666-6666-666666666666` | Clean pass |
+
+---
+
+## Running Tests
+
+```bash
+cd src
+uv run pytest --cov
+```
+
+---
+
+## Project Structure
+
+```
+src/
+├── api/                  # Mock Medicaid authorization API routes and models
+├── agents/               # AI agent definitions (Claim Builder — Step 3)
+├── background/           # Background jobs (re-validation)
+├── core/                 # Config, logging, exceptions
+├── db/                   # SQLAlchemy models and session
+├── schemas/              # Pydantic schemas for pipeline I/O
+├── scripts/              # Seed script for Pipeline A data
+├── services/             # Business logic for each pipeline step
+├── tests/                # Pytest test suite
+├── main.py               # FastAPI app entry point
+├── pyproject.toml        # Dependencies and tooling config
+└── docker-compose.yml    # PostgreSQL for local development
+```

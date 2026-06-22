@@ -1,15 +1,26 @@
 # Python-generated files
 __pycache__/
-*.py[oc]
+*.py[cod]
+*.pyo
 build/
 dist/
 wheels/
 *.egg-info
+*.egg-info/
 
 # Virtual environments
 .venv
+.venv/
+venv/
+env/
 
-# secrets and local runtime
+# Test / coverage / lint caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets and local runtime
 .env
 **/.env
 .DS_Store
