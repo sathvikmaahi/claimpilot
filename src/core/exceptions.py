@@ -6,13 +6,25 @@ class AuthAPIUnavailableError(Exception):
     """Raised when the mock Medicaid authorization API cannot be reached or times out."""
 
 
-class ValidationFailedError(Exception):
-    """Raised when a service event fails one of the 5 Pipeline B validation checks."""
+class ValidationFailure:
+    """A single validation check failure — check number and reason for clerk display."""
 
     def __init__(self, check: int, reason: str) -> None:
         self.check = check
         self.reason = reason
-        super().__init__(reason)
+
+    def __repr__(self) -> str:
+        return f"ValidationFailure(check={self.check}, reason={self.reason!r})"
+
+
+class ValidationFailedError(Exception):
+    """Raised when a service event fails one or more Pipeline B validation checks.
+    Always carries the full list of failures so the clerk sees all issues at once.
+    """
+
+    def __init__(self, failures: list["ValidationFailure"]) -> None:
+        self.failures = failures
+        super().__init__(repr(failures))
 
 
 class ClaimBuildError(Exception):

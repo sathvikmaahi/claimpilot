@@ -74,5 +74,10 @@ async def validate_event(
     except ValidationFailedError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"check": exc.check, "reason": exc.reason},
+            detail={
+                "failures": [
+                    {"check": f.check, "reason": f.reason}
+                    for f in exc.failures
+                ]
+            },
         ) from exc

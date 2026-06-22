@@ -138,8 +138,8 @@ async def test_david_lee_expired_auth():
     with pytest.raises(ValidationFailedError) as exc_info:
         await validate_service_event(event)
 
-    assert exc_info.value.check == 1
-    assert "CO-197" in exc_info.value.reason
+    assert exc_info.value.failures[0].check == 1
+    assert "CO-197" in exc_info.value.failures[0].reason
 
 
 async def test_maria_garcia_units_exhausted():
@@ -164,8 +164,8 @@ async def test_maria_garcia_units_exhausted():
     with pytest.raises(ValidationFailedError) as exc_info:
         await validate_service_event(event)
 
-    assert exc_info.value.check == 1
-    assert "CO-151" in exc_info.value.reason
+    assert exc_info.value.failures[0].check == 1
+    assert "CO-151" in exc_info.value.failures[0].reason
 
 
 async def test_units_exactly_at_limit_passes():
@@ -212,9 +212,9 @@ async def test_susan_brown_service_code_mismatch():
     with pytest.raises(ValidationFailedError) as exc_info:
         await validate_service_event(event)
 
-    assert exc_info.value.check == 2
-    assert "T2016" in exc_info.value.reason
-    assert "T2021" in exc_info.value.reason
+    assert exc_info.value.failures[0].check == 2
+    assert "T2016" in exc_info.value.failures[0].reason
+    assert "T2021" in exc_info.value.failures[0].reason
 
 
 # --- Check 3 failure ---
@@ -241,9 +241,9 @@ async def test_james_wilson_waiver_mismatch():
     with pytest.raises(ValidationFailedError) as exc_info:
         await validate_service_event(event)
 
-    assert exc_info.value.check == 3
-    assert "Partnership for Hope" in exc_info.value.reason
-    assert "Comprehensive" in exc_info.value.reason
+    assert exc_info.value.failures[0].check == 3
+    assert "Partnership for Hope" in exc_info.value.failures[0].reason
+    assert "Comprehensive" in exc_info.value.failures[0].reason
 
 
 # --- Check 4 failure ---
@@ -258,7 +258,7 @@ async def test_evv_missing_checkin():
     with pytest.raises(ValidationFailedError) as exc_info:
         await validate_service_event(event)
 
-    assert exc_info.value.check == 4
+    assert exc_info.value.failures[0].check == 4
 
 
 async def test_evv_missing_checkout():
@@ -271,7 +271,7 @@ async def test_evv_missing_checkout():
     with pytest.raises(ValidationFailedError) as exc_info:
         await validate_service_event(event)
 
-    assert exc_info.value.check == 4
+    assert exc_info.value.failures[0].check == 4
 
 
 # --- Check 5 failure ---
@@ -286,8 +286,8 @@ async def test_field_completeness_missing_npi():
     with pytest.raises(ValidationFailedError) as exc_info:
         await validate_service_event(event)
 
-    assert exc_info.value.check == 5
-    assert "Rendering NPI" in exc_info.value.reason
+    assert exc_info.value.failures[0].check == 5
+    assert "Rendering NPI" in exc_info.value.failures[0].reason
 
 
 async def test_field_completeness_missing_signature():
@@ -300,8 +300,8 @@ async def test_field_completeness_missing_signature():
     with pytest.raises(ValidationFailedError) as exc_info:
         await validate_service_event(event)
 
-    assert exc_info.value.check == 5
-    assert "DSP signature" in exc_info.value.reason
+    assert exc_info.value.failures[0].check == 5
+    assert "DSP signature" in exc_info.value.failures[0].reason
 
 
 async def test_field_completeness_multiple_missing():
@@ -314,6 +314,35 @@ async def test_field_completeness_multiple_missing():
     with pytest.raises(ValidationFailedError) as exc_info:
         await validate_service_event(event)
 
-    assert exc_info.value.check == 5
-    assert "Rendering NPI" in exc_info.value.reason
-    assert "DCN" in exc_info.value.reason
+    assert exc_info.value.failures[0].check == 5
+    assert "Rendering NPI" in exc_info.value.failures[0].reason
+    assert "DCN" in exc_info.value.failures[0].reason
+
+
+async def test_multiple_checks_fail_all_returned():
+    """
+    Input: Expired auth + EVV missing + NPI blank — 3 independent failures.
+    Description: Verifies that all failures are collected and returned in one raise,
+                 not just the first one. Check 1b (units) is skipped since auth is expired.
+    Output: ValidationFailedError with 3 failures: check 1 (CO-197), check 4, check 5.
+    """
+    event = make_event(
+        evv_checkin_lat=None,
+        rendering_npi="",
+        authorization=AuthorizationDetails(
+            patient_prior_auth_number="AUTH-2025-00103",
+            authorized_units=48,
+            validity_start_date=date(2025, 1, 1),
+            validity_end_date=date(2025, 12, 31),
+            authorized_service_code="T2016",
+            waiver_type="Comprehensive",
+        ),
+    )
+    with pytest.raises(ValidationFailedError) as exc_info:
+        await validate_service_event(event)
+
+    checks = [f.check for f in exc_info.value.failures]
+    assert 1 in checks  # expired auth CO-197
+    assert 4 in checks  # EVV missing
+    assert 5 in checks  # NPI blank
+    assert len(exc_info.value.failures) == 3
