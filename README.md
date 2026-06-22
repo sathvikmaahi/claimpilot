@@ -170,7 +170,7 @@ By combining voice, image, and text understanding with agentic AI orchestration,
 | Step | Description | Status |
 |------|-------------|--------|
 | Step 1 — Fetch | Pull service event from Pipeline A DB + call Medicaid auth API | Done |
-| Step 2 — Validate | 5 validation checks (auth, service code, waiver, EVV, completeness) | Pending |
+| Step 2 — Validate | 5 validation checks (auth expiry, units, service code, waiver, EVV, completeness) | Done |
 | Step 3 — Claim Builder | Google ADK + Gemini 2.5 Pro agent → 837P EDI mapping | Pending |
 | Step 4 — Clerk Review | Two-panel review UI → final 837P output | Pending |
 
@@ -225,17 +225,29 @@ Swagger UI available at `http://localhost:8000/docs`
 | GET | `/health` | Health check |
 | POST | `/authorization` | Mock Medicaid auth lookup |
 | GET | `/api/v1/fetch/{service_event_id}` | Step 1 — fetch and enrich service event |
+| GET | `/api/v1/validate/{service_event_id}` | Step 2 — validate enriched service event (5 checks) |
 
 **Test patient UUIDs:**
 
 | Patient | UUID | Scenario |
 |---------|------|----------|
 | John Smith | `11111111-1111-1111-1111-111111111111` | Clean pass |
-| Maria Garcia | `22222222-2222-2222-2222-222222222222` | Units exhausted |
-| David Lee | `33333333-3333-3333-3333-333333333333` | Expired auth |
+| Maria Garcia | `22222222-2222-2222-2222-222222222222` | Units exhausted (CO-151) |
+| David Lee | `33333333-3333-3333-3333-333333333333` | Expired auth (CO-197) |
 | Susan Brown | `44444444-4444-4444-4444-444444444444` | Service code mismatch |
 | James Wilson | `55555555-5555-5555-5555-555555555555` | Waiver mismatch |
 | Linda Martinez | `66666666-6666-6666-6666-666666666666` | Clean pass |
+
+**Step 2 validation checks:**
+
+| # | Check | Failure reason |
+|---|-------|---------------|
+| 1a | Auth not expired | Service date outside authorized period (CO-197) |
+| 1b | Units not exhausted | service_units > authorized_units (CO-151) |
+| 2 | Service code match | procedure_code ≠ authorized_service_code |
+| 3 | Waiver type | Individual not enrolled in Comprehensive Waiver |
+| 4 | EVV present | Check-in or check-out GPS coordinates missing |
+| 5 | Field completeness | NPI, DCN, procedure code, units, date, or DSP signature blank |
 
 ---
 
