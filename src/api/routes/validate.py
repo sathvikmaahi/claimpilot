@@ -1,18 +1,83 @@
 """
-Stub — Step 2 Validate route.
+Step 2 Validate route.
 
-Input: service_event_id (UUID path param) — must already have been fetched (Step 1).
-Description: Runs the 5 Pipeline B validation checks against the enriched service event.
-             Returns 200 with the validated EnrichedServiceEvent on PASS.
-             Returns 422 with the specific failure reason on FAIL — the claim enters the review queue.
-             Possible failure reasons map to the 5 checks:
-             — 'No active patient authorization found for this individual and service date'
-             — 'Service code mismatch between delivered service and authorization'
-             — 'Waiver mismatch — service not covered under individual\'s active waiver'
-             — 'EVV data missing or location outside expected geo-fence'
-             — 'Missing required fields: [specific list]'
-Output: 200 EnrichedServiceEvent (PASS) | 422 with failure detail (FAIL) | 404 service event not found.
+Input: service_event_id (UUID path param).
+Description: Fetches the enriched service event (Step 1) then runs the 5 Pipeline B
+             validation checks (Step 2) in sequence.
+             Check 1a — Auth not expired (CO-197)
+             Check 1b — Units not exhausted (CO-151)
+             Check 2  — Service code matches authorization
+             Check 3  — Individual enrolled in Comprehensive Waiver
+             Check 4  — EVV GPS coordinates present
+             Check 5  — All required 837P fields present
+             PASS → 200 with validated EnrichedServiceEvent.
+             FAIL → 422 with check number and specific failure reason.
+Output: 200 EnrichedServiceEvent (PASS) | 422 with failure detail (FAIL) | 404 not found | 502 auth API down.
 """
-from fastapi import APIRouter
+import uuid
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from api.dependencies import get_db, get_http_client, get_settings
+from core.config import Settings
+from core.exceptions import AuthAPIUnavailableError, ServiceEventNotFoundError, ValidationFailedError
+from schemas.service_event import EnrichedServiceEvent
+from services.fetch_service import fetch_service_event
+from services.validation_service import validate_service_event
 
 router = APIRouter()
+
+
+@router.get(
+    "/validate/{service_event_id}",
+    response_model=EnrichedServiceEvent,
+    status_code=200,
+    responses={
+        404: {"description": "No matching record in Pipeline A tables for this service_event_id."},
+        422: {"description": "Service event failed one of the 5 validation checks."},
+        502: {"description": "Mock Medicaid authorization API is unreachable or timed out."},
+    },
+)
+async def validate_event(
+    service_event_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    http_client: httpx.AsyncClient = Depends(get_http_client),
+    settings: Settings = Depends(get_settings),
+) -> EnrichedServiceEvent:
+    """
+    Input: service_event_id (UUID path parameter).
+    Description: Step 2 — fetches the enriched service event then validates it against
+                 5 Medicaid billing checks. Failed claims should be placed in the review
+                 queue by the caller.
+    Output: 200 EnrichedServiceEvent ready for Step 3 (Claim Builder).
+            422 with check number and reason if validation fails.
+            404 if service_event_id not found in Pipeline A tables.
+            502 if the mock auth API cannot be reached.
+    """
+    try:
+        event = await fetch_service_event(
+            service_event_id=service_event_id,
+            db=db,
+            http_client=http_client,
+            auth_api_url=settings.mock_auth_api_url,
+            auth_api_timeout=settings.auth_api_timeout,
+        )
+    except ServiceEventNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AuthAPIUnavailableError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    try:
+        return await validate_service_event(event)
+    except ValidationFailedError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "failures": [
+                    {"check": f.check, "reason": f.reason}
+                    for f in exc.failures
+                ]
+            },
+        ) from exc
