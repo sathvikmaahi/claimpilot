@@ -79,8 +79,8 @@ async def validate_event(
             service_event_id=event.service_event_id,
             patient_auth_number=event.authorization.patient_prior_auth_number,
             claim_status="failed",
-            validation_failure_check=exc.check,
-            validation_failure_reason=exc.reason,
+            validation_failure_check=exc.failures[0].check,
+            validation_failure_reason=" | ".join(f.reason for f in exc.failures),
         )
         db.add(failed_claim)
         await db.commit()

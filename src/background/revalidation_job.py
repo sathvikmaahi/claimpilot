@@ -98,8 +98,8 @@ async def run_revalidation_job() -> None:
                 except ValidationFailedError as exc:
                     # Still failing — update reason in case the blocking check changed
                     db_claim = await db.get(Claim, claim.claim_id)
-                    db_claim.validation_failure_check = exc.check
-                    db_claim.validation_failure_reason = exc.reason
+                    db_claim.validation_failure_check = exc.failures[0].check
+                    db_claim.validation_failure_reason = " | ".join(f.reason for f in exc.failures)
                     await db.commit()
 
                     logger.info(
