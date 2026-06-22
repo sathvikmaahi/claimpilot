@@ -7,7 +7,12 @@ class AuthAPIUnavailableError(Exception):
 
 
 class ValidationFailedError(Exception):
-    """Raised when a service event fails one or more of the 5 Pipeline B validation checks."""
+    """Raised when a service event fails one of the 5 Pipeline B validation checks."""
+
+    def __init__(self, check: int, reason: str) -> None:
+        self.check = check
+        self.reason = reason
+        super().__init__(reason)
 
 
 class ClaimBuildError(Exception):

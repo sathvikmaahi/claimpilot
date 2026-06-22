@@ -53,10 +53,10 @@ class EnrichedServiceEvent(BaseModel):
     personal_care_type: str | None
 
     # --- from service_metadata ---
-    evv_checkin_lat: float
-    evv_checkin_lng: float
-    evv_checkout_lat: float
-    evv_checkout_lng: float
+    evv_checkin_lat: float | None
+    evv_checkin_lng: float | None
+    evv_checkout_lat: float | None
+    evv_checkout_lng: float | None
     evv_caregiver_id: str
     diagnosis_code: str
     waiver_identifier: str
