@@ -11,7 +11,7 @@ Description: Fetches the enriched service event (Step 1) then runs the 5 Pipelin
              Check 4  — EVV GPS coordinates present
              Check 5  — All required 837P fields present
              PASS → 200 with validated EnrichedServiceEvent.
-             FAIL → 422 with check number and specific failure reason.
+             FAIL → claim written to review queue (claims table, status=failed) + 422 returned.
 Output: 200 EnrichedServiceEvent (PASS) | 422 with failure detail (FAIL) | 404 not found | 502 auth API down.
 """
 import uuid
@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.dependencies import get_db, get_http_client, get_settings
 from core.config import Settings
 from core.exceptions import AuthAPIUnavailableError, ServiceEventNotFoundError, ValidationFailedError
+from db.models.claims import Claim
 from schemas.service_event import EnrichedServiceEvent
 from services.fetch_service import fetch_service_event
 from services.validation_service import validate_service_event
@@ -36,7 +37,7 @@ router = APIRouter()
     status_code=200,
     responses={
         404: {"description": "No matching record in Pipeline A tables for this service_event_id."},
-        422: {"description": "Service event failed one of the 5 validation checks."},
+        422: {"description": "Service event failed one of the 5 validation checks — written to review queue."},
         502: {"description": "Mock Medicaid authorization API is unreachable or timed out."},
     },
 )
@@ -49,8 +50,10 @@ async def validate_event(
     """
     Input: service_event_id (UUID path parameter).
     Description: Step 2 — fetches the enriched service event then validates it against
-                 5 Medicaid billing checks. Failed claims should be placed in the review
-                 queue by the caller.
+                 5 Medicaid billing checks.
+                 PASS → returns validated event for Step 3 (Claim Builder).
+                 FAIL → writes claim to review queue (claim_status=failed) and returns 422.
+                        Background revalidation job will re-check failed claims periodically.
     Output: 200 EnrichedServiceEvent ready for Step 3 (Claim Builder).
             422 with check number and reason if validation fails.
             404 if service_event_id not found in Pipeline A tables.
@@ -72,6 +75,16 @@ async def validate_event(
     try:
         return await validate_service_event(event)
     except ValidationFailedError as exc:
+        failed_claim = Claim(
+            service_event_id=event.service_event_id,
+            patient_auth_number=event.authorization.patient_prior_auth_number,
+            claim_status="failed",
+            validation_failure_check=exc.check,
+            validation_failure_reason=exc.reason,
+        )
+        db.add(failed_claim)
+        await db.commit()
+
         raise HTTPException(
             status_code=422,
             detail={
