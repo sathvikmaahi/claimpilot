@@ -51,20 +51,31 @@ async def run_revalidation_job() -> None:
     still_failing = 0
     errors = 0
 
+    # Fetch only claim IDs (plain UUIDs) so nothing is tied to a session that later closes.
+    # Fetching full ORM objects here and using them after the session closes would detach
+    # them from SQLAlchemy — each claim is fully loaded inside its own session below instead.
     async with async_session_factory() as db:
         result = await db.execute(
-            select(Claim).where(Claim.claim_status == "failed")
+            select(Claim.claim_id).where(Claim.claim_status == "failed")
         )
-        failed_claims: list[Claim] = list(result.scalars().all())
+        claim_ids: list = list(result.scalars().all())
 
-    logger.info("revalidation_job: found %d failed claims to re-check", len(failed_claims))
+    logger.info("revalidation_job: found %d failed claims to re-check", len(claim_ids))
 
     async with httpx.AsyncClient() as http_client:
-        for claim in failed_claims:
+        for claim_id in claim_ids:
             async with async_session_factory() as db:
+                db_claim = await db.get(Claim, claim_id)
+                if db_claim is None:
+                    logger.warning(
+                        "revalidation_job: claim %s not found in DB — skipping", claim_id
+                    )
+                    errors += 1
+                    continue
+
                 try:
                     event = await fetch_service_event(
-                        service_event_id=claim.service_event_id,
+                        service_event_id=db_claim.service_event_id,
                         db=db,
                         http_client=http_client,
                         auth_api_url=settings.mock_auth_api_url,
@@ -73,7 +84,7 @@ async def run_revalidation_job() -> None:
                 except (ServiceEventNotFoundError, AuthAPIUnavailableError) as exc:
                     logger.warning(
                         "revalidation_job: could not fetch claim %s — %s",
-                        claim.claim_id,
+                        claim_id,
                         exc,
                     )
                     errors += 1
@@ -83,14 +94,6 @@ async def run_revalidation_job() -> None:
                     await validate_service_event(event)
 
                     # All 5 checks passed — promote to validated
-                    db_claim = await db.get(Claim, claim.claim_id)
-                    if db_claim is None:
-                        logger.warning(
-                            "revalidation_job: claim %s not found in DB — skipping",
-                            claim.claim_id,
-                        )
-                        errors += 1
-                        continue
                     db_claim.claim_status = "validated"
                     db_claim.validation_failure_check = None
                     db_claim.validation_failure_reason = None
@@ -98,27 +101,19 @@ async def run_revalidation_job() -> None:
 
                     logger.info(
                         "revalidation_job: claim %s now PASSING — promoted to validated",
-                        claim.claim_id,
+                        claim_id,
                     )
                     passed += 1
 
                 except ValidationFailedError as exc:
                     # Still failing — update reason in case the blocking check changed
-                    db_claim = await db.get(Claim, claim.claim_id)
-                    if db_claim is None:
-                        logger.warning(
-                            "revalidation_job: claim %s not found in DB — skipping",
-                            claim.claim_id,
-                        )
-                        errors += 1
-                        continue
                     db_claim.validation_failure_check = exc.failures[0].check
                     db_claim.validation_failure_reason = " | ".join(f.reason for f in exc.failures)
                     await db.commit()
 
                     logger.info(
                         "revalidation_job: claim %s still FAILING check %d — %s",
-                        claim.claim_id,
+                        claim_id,
                         exc.failures[0].check,
                         exc.failures[0].reason,
                     )
