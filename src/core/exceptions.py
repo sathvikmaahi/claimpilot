@@ -23,6 +23,8 @@ class ValidationFailedError(Exception):
     """
 
     def __init__(self, failures: list["ValidationFailure"]) -> None:
+        if not failures:
+            raise ValueError("ValidationFailedError requires at least one failure")
         self.failures = failures
         super().__init__(repr(failures))
 
