@@ -84,6 +84,13 @@ async def run_revalidation_job() -> None:
 
                     # All 5 checks passed — promote to validated
                     db_claim = await db.get(Claim, claim.claim_id)
+                    if db_claim is None:
+                        logger.warning(
+                            "revalidation_job: claim %s not found in DB — skipping",
+                            claim.claim_id,
+                        )
+                        errors += 1
+                        continue
                     db_claim.claim_status = "validated"
                     db_claim.validation_failure_check = None
                     db_claim.validation_failure_reason = None
@@ -98,6 +105,13 @@ async def run_revalidation_job() -> None:
                 except ValidationFailedError as exc:
                     # Still failing — update reason in case the blocking check changed
                     db_claim = await db.get(Claim, claim.claim_id)
+                    if db_claim is None:
+                        logger.warning(
+                            "revalidation_job: claim %s not found in DB — skipping",
+                            claim.claim_id,
+                        )
+                        errors += 1
+                        continue
                     db_claim.validation_failure_check = exc.failures[0].check
                     db_claim.validation_failure_reason = " | ".join(f.reason for f in exc.failures)
                     await db.commit()
@@ -105,8 +119,8 @@ async def run_revalidation_job() -> None:
                     logger.info(
                         "revalidation_job: claim %s still FAILING check %d — %s",
                         claim.claim_id,
-                        exc.check,
-                        exc.reason,
+                        exc.failures[0].check,
+                        exc.failures[0].reason,
                     )
                     still_failing += 1
 
