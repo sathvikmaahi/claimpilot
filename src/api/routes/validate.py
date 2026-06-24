@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_db, get_http_client, get_settings
 from core.config import Settings
-from core.exceptions import AuthAPIUnavailableError, ServiceEventNotFoundError, ValidationFailedError
+from core.exceptions import AuthAPIUnavailableError, DatabaseUnavailableError, ServiceEventNotFoundError, ValidationFailedError
 from db.models.claims import Claim
 from schemas.service_event import EnrichedServiceEvent
 from services.fetch_service import fetch_service_event
@@ -39,6 +39,7 @@ router = APIRouter()
         404: {"description": "No matching record in Pipeline A tables for this service_event_id."},
         422: {"description": "Service event failed one of the 5 validation checks — written to review queue."},
         502: {"description": "Mock Medicaid authorization API is unreachable or timed out."},
+        503: {"description": "Cloud SQL query failed — database unavailable."},
     },
 )
 async def validate_event(
@@ -71,6 +72,8 @@ async def validate_event(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except AuthAPIUnavailableError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except DatabaseUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     try:
         return await validate_service_event(event)

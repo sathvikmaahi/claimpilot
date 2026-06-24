@@ -1,13 +1,46 @@
+"""
+Step 1: Fetch.
+
+Input: service_event_id (UUID) — maps to documented_care_sessions.care_session_id.
+Description: Joins DocumentedCareSession with StaffShiftAssignment and CareRecipient
+             to build a flat EnrichedServiceEvent. Resolves ISP goal UUIDs to readable
+             text via support_plan_goals. Fetches MAR records joined with
+             prescribed_medications. Finally calls the mock Medicaid authorization API.
+             Empty MAR is valid (not all shifts involve medications).
+             Session not found in joined query → 404.
+             Auth API unreachable or timed out → 502.
+Output: EnrichedServiceEvent merging all Pipeline A data with patient authorization.
+"""
 import uuid
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.exceptions import AuthAPIUnavailableError, ServiceEventNotFoundError
-from db.models.pipeline_a import MAR, ProgressNote, ServiceMetadata
+from core.exceptions import AuthAPIUnavailableError, DatabaseUnavailableError, ServiceEventNotFoundError
+from db.models.pipeline_a import (
+    CareRecipient,
+    DocumentedCareSession,
+    MedicationAdministrationRecord,
+    PrescribedMedication,
+    StaffShiftAssignment,
+    SupportPlanGoal,
+)
 from schemas.auth import AuthorizationDetails
 from schemas.service_event import EnrichedServiceEvent, MARRecord
+
+# Maps service_billing_code → human-readable category for the agent
+_BILLING_CODE_TO_CATEGORY: dict[str, str] = {
+    "T2016": "Residential Habilitation",
+    "T2021": "Day Habilitation",
+    "H2014": "Supported Employment",
+    "H0004": "ABA Therapy",
+    "H2015": "Skill Development",
+    "T2025": "Community Networking",
+    "H2023": "Prevocational",
+    "T2003": "Transportation",
+}
 
 
 async def fetch_service_event(
@@ -18,47 +51,74 @@ async def fetch_service_event(
     auth_api_timeout: float = 10.0,
 ) -> EnrichedServiceEvent:
     """
-    Input: service_event_id (UUID), async DB session, httpx async client, auth API base URL.
-    Description: Step 1 (Fetch) — queries all three Pipeline A tables for the given service event,
-                 then enriches the result by calling the mock Medicaid authorization API.
-                 Empty MAR is valid (not all shifts have medications).
-                 progress_notes or service_metadata missing → 404.
-                 Auth API unreachable or timed out → 502.
-    Output: EnrichedServiceEvent merging all Pipeline A data with the patient authorization details.
+    Input: service_event_id, async DB session, httpx async client, auth API base URL.
+    Description: Step 1 (Fetch) — see module docstring.
+    Output: EnrichedServiceEvent merging all Pipeline A data with patient authorization.
     """
-    # 1 — progress_notes (required)
-    result = await db.execute(
-        select(ProgressNote).where(ProgressNote.service_event_id == service_event_id)
-    )
-    progress_note = result.scalar_one_or_none()
-    if progress_note is None:
-        raise ServiceEventNotFoundError(
-            f"No progress_notes record found for service_event_id={service_event_id}"
+    # 1 — Main join: documented_care_sessions + staff_shift_assignments + care_recipients
+    try:
+        result = await db.execute(
+            select(DocumentedCareSession, StaffShiftAssignment, CareRecipient)
+            .join(
+                StaffShiftAssignment,
+                DocumentedCareSession.shift_assignment_id == StaffShiftAssignment.shift_assignment_id,
+            )
+            .join(
+                CareRecipient,
+                DocumentedCareSession.care_recipient_id == CareRecipient.care_recipient_id,
+            )
+            .where(DocumentedCareSession.care_session_id == service_event_id)
         )
+        row = result.one_or_none()
+    except SQLAlchemyError as exc:
+        raise DatabaseUnavailableError(
+            f"DB query failed for service_event_id={service_event_id}: {exc}"
+        ) from exc
 
-    # 2 — service_metadata (required)
-    result = await db.execute(
-        select(ServiceMetadata).where(ServiceMetadata.service_event_id == service_event_id)
-    )
-    service_meta = result.scalar_one_or_none()
-    if service_meta is None:
+    if row is None:
         raise ServiceEventNotFoundError(
-            f"No service_metadata record found for service_event_id={service_event_id}"
+            f"No documented_care_sessions record found for service_event_id={service_event_id}"
         )
+    session, shift, recipient = row
 
-    # 3 — MAR (optional — empty list is valid)
-    result = await db.execute(
-        select(MAR).where(MAR.service_event_id == service_event_id)
-    )
-    mar_rows = list(result.scalars().all())
+    # 2 — Resolve ISP goal UUIDs → goal descriptions (skipped when no goals recorded)
+    goal_descriptions: list[str] = []
+    if session.goals_addressed_in_session:
+        try:
+            goal_result = await db.execute(
+                select(SupportPlanGoal.goal_description)
+                .where(SupportPlanGoal.goal_id.in_(session.goals_addressed_in_session))
+                .where(SupportPlanGoal.is_currently_active.is_(True))
+            )
+            goal_descriptions = list(goal_result.scalars().all())
+        except SQLAlchemyError as exc:
+            raise DatabaseUnavailableError(
+                f"Goals query failed for service_event_id={service_event_id}: {exc}"
+            ) from exc
+
+    # 3 — MAR records joined with prescribed_medications (empty list is valid)
+    try:
+        mar_result = await db.execute(
+            select(MedicationAdministrationRecord, PrescribedMedication)
+            .join(
+                PrescribedMedication,
+                MedicationAdministrationRecord.medication_id == PrescribedMedication.medication_id,
+            )
+            .where(MedicationAdministrationRecord.care_session_id == service_event_id)
+        )
+        mar_rows = list(mar_result.all())
+    except SQLAlchemyError as exc:
+        raise DatabaseUnavailableError(
+            f"MAR query failed for service_event_id={service_event_id}: {exc}"
+        ) from exc
 
     # 4 — Mock Medicaid authorization API
     try:
         response = await http_client.post(
             f"{auth_api_url}/authorization",
             json={
-                "patient_name": progress_note.participant_name,
-                "insurance_number": progress_note.participant_dcn,
+                "patient_name": recipient.full_name,
+                "insurance_number": recipient.medicaid_id,
             },
             timeout=auth_api_timeout,
         )
@@ -69,59 +129,80 @@ async def fetch_service_event(
             f"Mock auth API unreachable at {auth_api_url}: {exc}"
         ) from exc
 
+    # Derive "HH:MM-HH:MM" activity_time string from actual clock times (UTC)
+    if session.actual_clock_in_time and session.actual_clock_out_time:
+        activity_time = (
+            f"{session.actual_clock_in_time.strftime('%H:%M')}"
+            f"-{session.actual_clock_out_time.strftime('%H:%M')}"
+        )
+    else:
+        activity_time = None
+
     return EnrichedServiceEvent(
-        # progress_notes fields
-        service_event_id=progress_note.service_event_id,
-        participant_name=progress_note.participant_name,
-        participant_dcn=progress_note.participant_dcn,
-        participant_dob=progress_note.participant_dob,
-        service_date=progress_note.service_date,
-        begin_time=progress_note.begin_time,
-        end_time=progress_note.end_time,
-        service_location=progress_note.service_location,
-        provider_name=progress_note.provider_name,
-        provider_signature=progress_note.provider_signature,
-        service_description=progress_note.service_description,
-        activity_time=progress_note.activity_time,
-        participation_level=progress_note.participation_level,
-        support_level=progress_note.support_level,
-        goals_supported=progress_note.goals_supported,
-        activity_category=progress_note.activity_category,
-        health_observations=progress_note.health_observations,
-        behavioral_notes=progress_note.behavioral_notes,
-        community_activity=progress_note.community_activity,
-        meal_type=progress_note.meal_type,
-        personal_care_type=progress_note.personal_care_type,
-        # service_metadata fields
-        evv_checkin_lat=service_meta.evv_checkin_lat,
-        evv_checkin_lng=service_meta.evv_checkin_lng,
-        evv_checkout_lat=service_meta.evv_checkout_lat,
-        evv_checkout_lng=service_meta.evv_checkout_lng,
-        evv_caregiver_id=service_meta.evv_caregiver_id,
-        diagnosis_code=service_meta.diagnosis_code,
-        waiver_identifier=service_meta.waiver_identifier,
-        duration_minutes=service_meta.duration_minutes,
-        service_units=service_meta.service_units,
-        rendering_npi=service_meta.rendering_npi,
-        procedure_code=service_meta.procedure_code,
-        modifier_1=service_meta.modifier_1,
-        modifier_2=service_meta.modifier_2,
-        modifier_3=service_meta.modifier_3,
-        authorization_number=service_meta.authorization_number,
-        flags=service_meta.flags,
-        overall_confidence=service_meta.overall_confidence,
-        # MAR rows
+        # identity
+        service_event_id=session.care_session_id,
+
+        # from care_recipients
+        participant_name=recipient.full_name,
+        participant_dcn=recipient.medicaid_id,
+        participant_dob=recipient.date_of_birth,
+        sex=None,  # PENDING: recipient.sex — friend to add sex column to care_recipients
+
+        # from staff_shift_assignments
+        service_date=shift.shift_date,
+        service_location=shift.service_location_name,
+        provider_name=shift.direct_support_professional_name,
+        procedure_code=shift.service_billing_code,
+        rendering_npi=None,   # PENDING: shift.rendering_npi — friend to add to staff_shift_assignments
+        modifier_1=None,      # PENDING: shift.modifier_1 — friend to add to staff_shift_assignments
+        modifier_2=None,      # PENDING: shift.modifier_2 — friend to add to staff_shift_assignments
+        modifier_3=None,      # PENDING: shift.modifier_3 — friend to add to staff_shift_assignments
+
+        # from documented_care_sessions
+        begin_time=session.actual_clock_in_time.time() if session.actual_clock_in_time else None,
+        end_time=session.actual_clock_out_time.time() if session.actual_clock_out_time else None,
+        provider_signature="signed" if session.dsp_has_signed else "unsigned",
+        service_description=session.care_session_narrative or "",
+        activity_time=activity_time,
+        activity_category=_BILLING_CODE_TO_CATEGORY.get(shift.service_billing_code, shift.service_billing_code),
+        participation_level=session.recipient_engagement_notes or "",
+        support_level=session.level_of_support_provided or "",
+        goals_supported=goal_descriptions,
+        health_observations=session.health_observations_notes,
+        behavioral_notes=session.behavioral_observations_notes,
+        community_activity=session.community_outing_notes,
+        meal_type=", ".join(session.meals_provided) if session.meals_provided else None,
+        personal_care_type=", ".join(session.personal_care_activities) if session.personal_care_activities else None,
+
+        # EVV from documented_care_sessions
+        evv_checkin_lat=float(session.checkin_location_latitude) if session.checkin_location_latitude is not None else None,
+        evv_checkin_lng=float(session.checkin_location_longitude) if session.checkin_location_longitude is not None else None,
+        evv_checkout_lat=float(session.checkout_location_latitude) if session.checkout_location_latitude is not None else None,
+        evv_checkout_lng=float(session.checkout_location_longitude) if session.checkout_location_longitude is not None else None,
+        evv_caregiver_id=None,  # not in schema.sql
+
+        # billing metadata
+        diagnosis_code=recipient.primary_diagnosis_code,
+        waiver_identifier=recipient.waiver_program,
+        duration_minutes=session.total_duration_minutes or 0,
+        service_units=session.billable_units_calculated or 0,
+        authorization_number=None,  # not in schema.sql
+        flags=[{"message": f} for f in (session.documentation_gap_flags or [])],
+        overall_confidence=session.ai_confidence_rating or "Medium",
+
+        # MAR: resolved from medication_administration_records + prescribed_medications JOIN
         mar_records=[
             MARRecord(
-                id=mar.id,
-                service_event_id=mar.service_event_id,
-                med_name=mar.med_name,
-                med_dosage=mar.med_dosage,
-                med_time_administered=mar.med_time_administered,
-                variance_code=mar.variance_code,
+                id=mar_rec.administration_record_id,
+                service_event_id=mar_rec.care_session_id,
+                med_name=med.medication_name,
+                med_dosage=med.dosage_amount,
+                med_time_administered=mar_rec.actual_administration_time.time() if mar_rec.actual_administration_time else None,
+                variance_code=mar_rec.reason_if_not_given if not mar_rec.was_medication_given else None,
             )
-            for mar in mar_rows
+            for mar_rec, med in mar_rows
         ],
-        # auth API
+
+        # mock Medicaid authorization API
         authorization=AuthorizationDetails(**auth_data),
     )

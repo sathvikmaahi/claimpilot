@@ -1,87 +1,157 @@
 import uuid
-from datetime import date, time
+from datetime import date, time, datetime
 
-from sqlalchemy import ForeignKey, String, Text, Date, Time, Integer, Float, Numeric
-from sqlalchemy.dialects.postgresql import UUID as PGUUID, JSONB
+from sqlalchemy import Boolean, Date, ForeignKey, Integer, String, Text, Time, TIMESTAMP, func
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.session import Base
 
 
-class ProgressNote(Base):
+class CareRecipient(Base):
     """
-    Pipeline A progress_notes table — the DSP's confirmed shift record.
-    Read-only from Pipeline B's perspective. One row per ISL shift.
+    Pipeline A care_recipients table — one row per individual served.
+    Provides participant_name (full_name), participant_dcn (medicaid_id),
+    participant_dob, diagnosis_code, and waiver_identifier.
+    Read-only from Pipeline B's perspective.
+    PENDING — friend to add: sex CHAR(1) M/F/U needed for 837P DMG segment.
     """
-    __tablename__ = "progress_notes"
+    __tablename__ = "care_recipients"
 
-    service_event_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    participant_name: Mapped[str] = mapped_column(String(255))
-    participant_dcn: Mapped[str] = mapped_column(String(50))  # Missouri Medicaid 9-digit ID, used as insurance_number for auth API
-    participant_dob: Mapped[date] = mapped_column(Date)
-    service_date: Mapped[date] = mapped_column(Date)
-    begin_time: Mapped[time] = mapped_column(Time)
-    end_time: Mapped[time] = mapped_column(Time)
-    service_location: Mapped[str] = mapped_column(String(255))
-    provider_name: Mapped[str] = mapped_column(String(255))
-    provider_signature: Mapped[str] = mapped_column(String(255))
-    service_description: Mapped[str] = mapped_column(Text)
-    activity_time: Mapped[str] = mapped_column(String(100))
-    participation_level: Mapped[str] = mapped_column(String(255))
-    support_level: Mapped[str] = mapped_column(String(100))
-    goals_supported: Mapped[list] = mapped_column(JSONB)
-    activity_category: Mapped[str] = mapped_column(String(100))
-    health_observations: Mapped[str | None] = mapped_column(Text, nullable=True)
-    behavioral_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    community_activity: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    meal_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    personal_care_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    care_recipient_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    full_name: Mapped[str] = mapped_column(Text)                    # → participant_name
+    medicaid_id: Mapped[str] = mapped_column(String(50))            # → participant_dcn (MO 9-digit Medicaid ID)
+    date_of_birth: Mapped[date] = mapped_column(Date)               # → participant_dob
+    waiver_program: Mapped[str] = mapped_column(Text)               # → waiver_identifier
+    primary_diagnosis_code: Mapped[str] = mapped_column(Text)       # → diagnosis_code (ICD-10)
+    record_created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
+    # sex: Mapped[str] = mapped_column(String(1))  # PENDING: friend to add — needed for 837P DMG segment
 
 
-class MAR(Base):
+class StaffShiftAssignment(Base):
     """
-    Pipeline A mar table — medication administration records for each shift.
-    One row per medication administered. May be empty for a given shift.
+    Pipeline A staff_shift_assignments table — one row per scheduled DSP shift.
+    Provides service_date (shift_date), service_location (service_location_name),
+    provider_name (direct_support_professional_name), and procedure_code (service_billing_code).
+    PENDING — friend to add: rendering_npi, modifier_1/2/3 (needed for 837P SV1 + Loop 2310B).
     """
-    __tablename__ = "mar"
+    __tablename__ = "staff_shift_assignments"
 
-    id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    service_event_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("progress_notes.service_event_id"),
+    shift_assignment_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    care_recipient_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("care_recipients.care_recipient_id")
     )
-    med_name: Mapped[str] = mapped_column(String(255))
-    med_dosage: Mapped[str] = mapped_column(String(100))
-    med_time_administered: Mapped[time] = mapped_column(Time)
-    variance_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    direct_support_professional_name: Mapped[str] = mapped_column(Text)    # → provider_name
+    service_location_name: Mapped[str] = mapped_column(Text)               # → service_location (ISL home → 837P CLM05)
+    shift_date: Mapped[date] = mapped_column(Date)                         # → service_date
+    scheduled_start_time: Mapped[time] = mapped_column(Time)
+    scheduled_end_time: Mapped[time] = mapped_column(Time)
+    service_billing_code: Mapped[str] = mapped_column(String(10))          # → procedure_code (e.g. T2016)
+    record_created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
+    # rendering_npi: Mapped[str | None] = mapped_column(String(10), nullable=True)  # PENDING: friend to add → 837P Loop 2310B NM109
+    # modifier_1: Mapped[str | None] = mapped_column(String(10), nullable=True)     # PENDING: friend to add → SV101-3
+    # modifier_2: Mapped[str | None] = mapped_column(String(10), nullable=True)     # PENDING: friend to add → SV101-4
+    # modifier_3: Mapped[str | None] = mapped_column(String(10), nullable=True)     # PENDING: friend to add → SV101-5
 
 
-class ServiceMetadata(Base):
+class DocumentedCareSession(Base):
     """
-    Pipeline A service_metadata table — EVV, billing codes, modifiers, and AI-computed fields.
-    One row per service event. service_event_id is both PK and FK.
+    Pipeline A documented_care_sessions table — the DSP's confirmed shift record.
+    Primary entity for Pipeline B Step 1 (Fetch). care_session_id is used as service_event_id
+    throughout Pipeline B — it is what is passed to GET /api/v1/fetch/{service_event_id}.
+    Replaces the old flat progress_notes + service_metadata tables.
     """
-    __tablename__ = "service_metadata"
+    __tablename__ = "documented_care_sessions"
 
-    service_event_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("progress_notes.service_event_id"),
-        primary_key=True,
+    care_session_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    shift_assignment_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("staff_shift_assignments.shift_assignment_id")
     )
-    evv_checkin_lat: Mapped[float] = mapped_column(Float)
-    evv_checkin_lng: Mapped[float] = mapped_column(Float)
-    evv_checkout_lat: Mapped[float] = mapped_column(Float)
-    evv_checkout_lng: Mapped[float] = mapped_column(Float)
-    evv_caregiver_id: Mapped[str] = mapped_column(String(100))
-    diagnosis_code: Mapped[str] = mapped_column(String(20))
-    waiver_identifier: Mapped[str] = mapped_column(String(100))
-    duration_minutes: Mapped[int] = mapped_column(Integer)
-    service_units: Mapped[int] = mapped_column(Integer)
-    rendering_npi: Mapped[str] = mapped_column(String(10))
-    procedure_code: Mapped[str] = mapped_column(String(10))
-    modifier_1: Mapped[str] = mapped_column(String(10))
-    modifier_2: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    modifier_3: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    authorization_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    flags: Mapped[list] = mapped_column(JSONB)
-    overall_confidence: Mapped[str] = mapped_column(String(20))
+    care_recipient_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("care_recipients.care_recipient_id")
+    )
+    actual_clock_in_time: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)   # → begin_time (.time() extracted)
+    actual_clock_out_time: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)  # → end_time (.time() extracted)
+    total_duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)         # → duration_minutes
+    billable_units_calculated: Mapped[int | None] = mapped_column(Integer, nullable=True)      # → service_units
+    care_session_narrative: Mapped[str | None] = mapped_column(Text, nullable=True)            # → service_description
+    activities_performed: Mapped[list | None] = mapped_column(ARRAY(Text), nullable=True)
+    level_of_support_provided: Mapped[str | None] = mapped_column(Text, nullable=True)         # → support_level (verbal_prompts/physical_assistance/full_support/independent)
+    recipient_engagement_notes: Mapped[str | None] = mapped_column(Text, nullable=True)        # → participation_level
+    health_observations_notes: Mapped[str | None] = mapped_column(Text, nullable=True)         # → health_observations
+    behavioral_observations_notes: Mapped[str | None] = mapped_column(Text, nullable=True)     # → behavioral_notes
+    community_outing_notes: Mapped[str | None] = mapped_column(Text, nullable=True)            # → community_activity
+    meals_provided: Mapped[list | None] = mapped_column(ARRAY(Text), nullable=True)            # → meal_type (joined to comma string)
+    personal_care_activities: Mapped[list | None] = mapped_column(ARRAY(Text), nullable=True)  # → personal_care_type (joined to comma string)
+    goals_addressed_in_session: Mapped[list | None] = mapped_column(ARRAY(PGUUID(as_uuid=True)), nullable=True)  # UUIDs → resolved to text via support_plan_goals
+    checkin_location_latitude: Mapped[float | None] = mapped_column(nullable=True)             # → evv_checkin_lat
+    checkin_location_longitude: Mapped[float | None] = mapped_column(nullable=True)            # → evv_checkin_lng
+    checkout_location_latitude: Mapped[float | None] = mapped_column(nullable=True)            # → evv_checkout_lat
+    checkout_location_longitude: Mapped[float | None] = mapped_column(nullable=True)           # → evv_checkout_lng
+    ai_confidence_rating: Mapped[str | None] = mapped_column(String(20), nullable=True)        # → overall_confidence (High/Medium/Low)
+    documentation_gap_flags: Mapped[list | None] = mapped_column(ARRAY(Text), nullable=True)   # → flags (text[] → list[dict])
+    dsp_has_signed: Mapped[bool] = mapped_column(Boolean, default=False)                       # → provider_signature ("signed"/"unsigned")
+    session_status: Mapped[str] = mapped_column(String(50), default="in_progress")
+    record_created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
+    record_updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
+    goals_resolution: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+class PrescribedMedication(Base):
+    """
+    Pipeline A prescribed_medications table — medication profile per participant.
+    Joined to MedicationAdministrationRecord to resolve med_name and med_dosage for the MAR.
+    """
+    __tablename__ = "prescribed_medications"
+
+    medication_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    care_recipient_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("care_recipients.care_recipient_id")
+    )
+    medication_name: Mapped[str] = mapped_column(Text)    # → med_name
+    dosage_amount: Mapped[str] = mapped_column(Text)      # → med_dosage
+    administration_route: Mapped[str] = mapped_column(Text)
+    scheduled_time_of_day: Mapped[time] = mapped_column(Time)
+    is_currently_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    record_created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class MedicationAdministrationRecord(Base):
+    """
+    Pipeline A medication_administration_records table — one row per medication per shift.
+    Joined with PrescribedMedication to resolve med_name and med_dosage.
+    was_medication_given + reason_if_not_given replace the old single variance_code field:
+      given=True  → variance_code=None
+      given=False → variance_code=reason_if_not_given
+    """
+    __tablename__ = "medication_administration_records"
+
+    administration_record_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    care_session_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("documented_care_sessions.care_session_id")
+    )
+    medication_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("prescribed_medications.medication_id")
+    )
+    was_medication_given: Mapped[bool] = mapped_column(Boolean)
+    actual_administration_time: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)  # → med_time_administered (.time() extracted)
+    reason_if_not_given: Mapped[str | None] = mapped_column(Text, nullable=True)  # → variance_code when not given
+    record_created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class SupportPlanGoal(Base):
+    """
+    Pipeline A support_plan_goals table — ISP goals per participant.
+    Queried by the fetch service to resolve goals_addressed_in_session (uuid[]) →
+    goal_description (str) so the Claim Builder agent receives readable text.
+    """
+    __tablename__ = "support_plan_goals"
+
+    goal_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    care_recipient_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("care_recipients.care_recipient_id")
+    )
+    goal_category: Mapped[str] = mapped_column(Text)         # daily_living / community_integration / health_and_safety / employment / social_skills
+    goal_description: Mapped[str] = mapped_column(Text)      # → goals_supported list item
+    is_currently_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    record_created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())

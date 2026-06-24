@@ -1,5 +1,5 @@
 class ServiceEventNotFoundError(Exception):
-    """Raised when a service_event_id has no matching row in progress_notes or service_metadata."""
+    """Raised when a service_event_id has no matching row in documented_care_sessions."""
 
 
 class AuthAPIUnavailableError(Exception):
@@ -31,3 +31,7 @@ class ValidationFailedError(Exception):
 
 class ClaimBuildError(Exception):
     """Raised when the Claim Builder agent cannot produce a valid 837P EDI file."""
+
+
+class DatabaseUnavailableError(Exception):
+    """Raised when a Cloud SQL query fails due to a connection or driver-level error."""
