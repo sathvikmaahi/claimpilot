@@ -28,7 +28,7 @@ class Claim(Base):
     claim_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     service_event_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("progress_notes.service_event_id"),
+        ForeignKey("documented_care_sessions.care_session_id"),
     )
     patient_auth_number: Mapped[str] = mapped_column(String(100))          # REF G1 on 837P — from mock auth API
 
