@@ -1,5 +1,5 @@
 class ServiceEventNotFoundError(Exception):
-    """Raised when a service_event_id has no matching row in progress_notes or service_metadata."""
+    """Raised when a service_event_id has no matching row in documented_care_sessions."""
 
 
 class AuthAPIUnavailableError(Exception):
