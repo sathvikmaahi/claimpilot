@@ -8,6 +8,8 @@ from api.router import router
 from api.routes import fetch, validate, claim_builder, clerk_review
 from core.logging import setup_logging
 
+from fastapi.middleware.cors import CORSMiddleware
+from api.routes import extract, submit, transcribe, roster
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -29,3 +31,25 @@ app.include_router(fetch.router, prefix="/api/v1", tags=["fetch"])
 app.include_router(validate.router, prefix="/api/v1", tags=["validate"])
 app.include_router(claim_builder.router, prefix="/api/v1", tags=["claim-builder"])
 app.include_router(clerk_review.router, prefix="/api/v1", tags=["clerk-review"])
+
+
+# --- Voice agent (Pipeline A) integration -------------------------------------
+# Mounts the voice-note routes and enables browser CORS on the same app, so a
+# single `main:app` serves both the clerk (Pipeline B) and voice (Pipeline A)
+# pipelines. Added during the voice_agent -> src/ merge.
+
+# CORS — lets a browser frontend (different origin) call this API.
+# POC: allow all origins. TIGHTEN before production — restrict allow_origins to
+# the actual frontend URL(s), since this is a Medicaid/PHI app.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],      # POC only — replace with frontend origin(s) for prod
+    allow_credentials=False,  # must be False while allow_origins is "*"
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(extract.router, prefix="/api/v1", tags=["extract"])
+app.include_router(submit.router, prefix="/api/v1", tags=["submit"])
+app.include_router(transcribe.router, prefix="/api/v1", tags=["transcribe"])
+app.include_router(roster.router, prefix="/api/v1", tags=["roster"])
