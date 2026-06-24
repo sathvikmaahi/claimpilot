@@ -1,4 +1,5 @@
 from google.adk.agents.llm_agent import Agent
+from google.genai import types
 from pydantic import BaseModel, Field
 
 from agents.prompts import load_prompt
@@ -27,6 +28,11 @@ def build_observation_extractor(field: str) -> Agent:
         description="Extracts a single observation field from a short DSP narration.",
         instruction=load_prompt("observation_extractor").format(field_guidance=FIELD_GUIDANCE[field]),
         output_schema=Observation,
+        generate_content_config=types.GenerateContentConfig(
+            # Single-field extraction needs little reasoning; a small thinking budget
+            # keeps each call fast and cheap (called once per toggled observation).
+            thinking_config=types.ThinkingConfig(thinking_budget=512),
+        ),
     )
 
 
