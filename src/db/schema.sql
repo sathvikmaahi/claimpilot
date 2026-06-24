@@ -92,14 +92,13 @@ CREATE TABLE public.documented_care_sessions (
     checkin_location_longitude numeric(9,6),
     checkout_location_latitude numeric(9,6),
     checkout_location_longitude numeric(9,6),
-    ai_confidence_rating text,
+    ai_confidence_rating text,  -- agent confidence as a 0.0-1.0 score, stored as text (was High/Medium/Low)
     documentation_gap_flags text[],
     dsp_has_signed boolean DEFAULT false NOT NULL,
     session_status text DEFAULT 'in_progress'::text NOT NULL,
     record_created_at timestamp with time zone DEFAULT now() NOT NULL,
     record_updated_at timestamp with time zone DEFAULT now() NOT NULL,
     goals_resolution jsonb,
-    CONSTRAINT documented_care_sessions_ai_confidence_rating_check CHECK ((ai_confidence_rating = ANY (ARRAY['High'::text, 'Medium'::text, 'Low'::text]))),
     CONSTRAINT documented_care_sessions_level_of_support_provided_check CHECK ((level_of_support_provided = ANY (ARRAY['independent'::text, 'verbal_prompts'::text, 'physical_assistance'::text, 'full_support'::text]))),
     CONSTRAINT documented_care_sessions_session_status_check CHECK ((session_status = ANY (ARRAY['in_progress'::text, 'submitted_by_dsp'::text, 'ready_for_billing'::text])))
 );

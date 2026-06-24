@@ -17,10 +17,10 @@ class GoalAddressed(BaseModel):
 
 
 class Confidence(BaseModel):
-    activities_performed: Literal["High", "Medium", "Low"]
-    activity_timestamps: Literal["High", "Medium", "Low"]
-    support_level: Literal["High", "Medium", "Low"]
-    individual_response: Literal["High", "Medium", "Low"]
+    activities_performed: float = Field(ge=0.0, le=1.0, description="Confidence from 0.0 (none) to 1.0 (certain)")
+    activity_timestamps: float = Field(ge=0.0, le=1.0, description="Confidence from 0.0 (none) to 1.0 (certain)")
+    support_level: float = Field(ge=0.0, le=1.0, description="Confidence from 0.0 (none) to 1.0 (certain)")
+    individual_response: float = Field(ge=0.0, le=1.0, description="Confidence from 0.0 (none) to 1.0 (certain)")
 
 
 class NarrativeExtraction(BaseModel):
@@ -37,7 +37,7 @@ class NarrativeExtraction(BaseModel):
     isp_goals_addressed: list[GoalAddressed] = Field(
         description="Active goals clearly addressed by the activities; empty list if none clearly apply")
     confidence: Confidence = Field(
-        description="Honest High/Medium/Low confidence for each field")
+        description="Honest 0.0-1.0 confidence for each field")
 
 
 def build_narrative_extractor(goals_text: str) -> Agent:

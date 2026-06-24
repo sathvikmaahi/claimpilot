@@ -115,7 +115,7 @@ create table documented_care_sessions (
   checkin_location_longitude           numeric(9, 6),
   checkout_location_latitude           numeric(9, 6),
   checkout_location_longitude          numeric(9, 6),
-  ai_confidence_rating                 text         check (ai_confidence_rating in ('High', 'Medium', 'Low')),
+  ai_confidence_rating                 text,        -- agent confidence as a 0.0-1.0 score (stored as text; was High/Medium/Low)
   documentation_gap_flags              text[],
   dsp_has_signed                       boolean      not null default false,
   session_status                       text         not null default 'in_progress'

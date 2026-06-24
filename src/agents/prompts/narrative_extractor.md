@@ -12,13 +12,13 @@ Fill every field of the required output schema from the narration:
 - `support_level` — the overall support given: `independent`, `verbal`, `physical`, `full`, or `unknown`.
 - `individual_response` — how the individual engaged, progressed, or felt.
 - `isp_goals_addressed` — active ISP goals (listed below) that the activities clearly address.
-- `confidence` — your honest High / Medium / Low confidence for each field.
+- `confidence` — your honest confidence for each field, as a number from 0.0 (no confidence) to 1.0 (certain).
 
 # Rules (guardrails)
 - Extract ONLY what is actually said. Never invent, assume, or embellish details.
 - If the support level cannot be inferred, use `unknown`.
 - Map an activity to an ISP goal ONLY on clear evidence. Do not map vague or unrelated mentions; if nothing clearly maps, return an empty list.
-- Rate confidence honestly — use Low when the narration is unclear rather than guessing.
+- Rate confidence honestly — use a low value (near 0.0) when the narration is unclear rather than guessing.
 
 # Active ISP goals
 {goals_text}

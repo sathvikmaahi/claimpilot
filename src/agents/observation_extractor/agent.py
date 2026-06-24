@@ -1,6 +1,5 @@
 from google.adk.agents.llm_agent import Agent
 from pydantic import BaseModel, Field
-from typing import Literal
 
 from agents.prompts import load_prompt
 
@@ -14,8 +13,8 @@ FIELD_GUIDANCE = {
 
 class Observation(BaseModel):
     value: str = Field(description="A concise clinical note for the one target topic only")
-    confidence: Literal["High", "Medium", "Low"] = Field(
-        description="Honest confidence in the extracted value")
+    confidence: float = Field(
+        ge=0.0, le=1.0, description="Honest confidence from 0.0 (none) to 1.0 (certain)")
 
 
 def build_observation_extractor(field: str) -> Agent:

@@ -9,9 +9,9 @@ Extract ONLY this: {field_guidance}.
 
 # What to return
 - `value` — a concise clinical note covering the target topic only.
-- `confidence` — your honest High / Medium / Low confidence in that value.
+- `confidence` — your honest confidence in that value, as a number from 0.0 (no confidence) to 1.0 (certain).
 
 # Rules (guardrails)
 - Stay strictly on the target topic. Do NOT include anything about any other topic, even if the DSP mentions it.
-- If the note does not actually contain this topic, set `value` to an empty string and `confidence` to "Low".
+- If the note does not actually contain this topic, set `value` to an empty string and `confidence` to 0.0.
 - Never invent or assume details — extract only what is actually said.

@@ -296,6 +296,21 @@ def validate_goals_resolution(goals_resolution: list[dict], goals_raw: list) -> 
             )
             
             
+def _confidence_value(score) -> str | None:
+    """Render the agent's 0.0-1.0 confidence for the record (stored as text, e.g. "0.85").
+
+    The agents now emit a numeric confidence (0.0-1.0). We persist the raw score.
+    The old High/Medium/Low CHECK constraint on ai_confidence_rating has been
+    dropped (see schema.sql) to allow this. Returns None if no score is present.
+    """
+    if score is None:
+        return None
+    try:
+        return f"{float(score):.2f}"
+    except (TypeError, ValueError):
+        return None
+
+
 def _build_care_session_row(approved: dict, ctx: dict, goals_resolution: list[dict] | None = None) -> dict:
     """Map the approved note (Voice Extraction Object) -> a documented_care_sessions row."""
     from psycopg2.extras import Json
@@ -339,7 +354,7 @@ def _build_care_session_row(approved: dict, ctx: dict, goals_resolution: list[di
         "goals_resolution": Json(goals_resolution),
         # Gaps + confidence.
         "documentation_gap_flags": [g["message"] for g in approved.get("gaps_detected", [])],
-        "ai_confidence_rating": approved.get("confidence", {}).get("activities_performed", "Medium"),
+        "ai_confidence_rating": _confidence_value(approved.get("confidence", {}).get("activities_performed")),
         # Status — the DSP has reviewed and signed.
         "dsp_has_signed": True,
         "session_status": "submitted_by_dsp",
