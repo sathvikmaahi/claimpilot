@@ -8,6 +8,8 @@ from api.router import router
 from api.routes import fetch, validate, claim_builder, clerk_review
 from core.logging import setup_logging
 
+from fastapi.middleware.cors import CORSMiddleware
+from api.routes import extract, submit, transcribe, roster
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -35,8 +37,6 @@ app.include_router(clerk_review.router, prefix="/api/v1", tags=["clerk-review"])
 # Mounts the voice-note routes and enables browser CORS on the same app, so a
 # single `main:app` serves both the clerk (Pipeline B) and voice (Pipeline A)
 # pipelines. Added during the voice_agent -> src/ merge.
-from fastapi.middleware.cors import CORSMiddleware
-from api.routes import extract, submit, transcribe, roster
 
 # CORS — lets a browser frontend (different origin) call this API.
 # POC: allow all origins. TIGHTEN before production — restrict allow_origins to
@@ -49,7 +49,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(extract.router)
-app.include_router(submit.router)
-app.include_router(transcribe.router)
-app.include_router(roster.router)
+app.include_router(extract.router, prefix="/api/v1", tags=["extract"])
+app.include_router(submit.router, prefix="/api/v1", tags=["submit"])
+app.include_router(transcribe.router, prefix="/api/v1", tags=["transcribe"])
+app.include_router(roster.router, prefix="/api/v1", tags=["roster"])
