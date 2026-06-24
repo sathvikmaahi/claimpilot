@@ -11,6 +11,11 @@ class NoShiftToday(Exception):
     A real, expected condition (not a bug) — callers can catch this and
     return a clean response instead of a raw crash."""
 
+
+class RecipientNotFound(Exception):
+    """Raised when no care recipient matches the given medicaid_id.
+    An expected condition (unknown/bad id) — callers map it to a 404."""
+
 def _connect():
     """Open a fresh Cloud SQL connection."""
     return psycopg2.connect(
@@ -37,6 +42,10 @@ def load_context(medicaid_id: str) -> dict:
         where medicaid_id = %s;
     """, (medicaid_id,))
     recipient = cur.fetchone()
+    if recipient is None:
+        cur.close()
+        conn.close()
+        raise RecipientNotFound(f"No care recipient found for medicaid_id {medicaid_id}.")
     care_recipient_id = recipient["care_recipient_id"]
 
     # 2. Active goals.
