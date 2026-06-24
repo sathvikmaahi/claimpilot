@@ -60,11 +60,12 @@ def load_context(medicaid_id: str) -> dict:
 
     # 4. Today's shift.
     cur.execute("""
-        select shift_assignment_id, direct_support_professional_name,
-               service_location_name, scheduled_start_time, scheduled_end_time,
-               service_billing_code
-        from staff_shift_assignments
-        where care_recipient_id = %s and shift_date = current_date;
+        select s.shift_assignment_id, s.direct_support_professional_name,
+               sl.service_location_name, s.scheduled_start_time, s.scheduled_end_time,
+               s.service_billing_code
+        from staff_shift_assignments s
+        join service_locations sl on sl.location_id = s.location_id
+        where s.care_recipient_id = %s and s.shift_date = current_date;
     """, (care_recipient_id,))
     shift_row = cur.fetchone()
 
@@ -245,12 +246,14 @@ def load_roster(dsp_name: str) -> list[dict]:
     cur.execute("""
         select r.full_name        as recipient_name,
                r.medicaid_id       as medicaid_id,
-               s.service_location_name,
+               sl.service_location_name,
                s.scheduled_start_time,
                s.scheduled_end_time
         from staff_shift_assignments s
         join care_recipients r
           on r.care_recipient_id = s.care_recipient_id
+        join service_locations sl
+          on sl.location_id = s.location_id
         where s.direct_support_professional_name = %s
           and s.shift_date = current_date
         order by s.scheduled_start_time;

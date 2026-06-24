@@ -1,6 +1,6 @@
-## 3. THE SEVEN-TABLE SCHEMA
+## 3. THE EIGHT-TABLE SCHEMA
 
-The schema is intentionally minimal — seven tables is the smallest set that covers the end-to-end flow from "DSP arrives at the home" to "claim submitted to Medicaid." Every table earned its place.
+The schema is intentionally minimal — eight tables is the smallest set that covers the end-to-end flow from "DSP arrives at the home" to "claim submitted to Medicaid." Every table earned its place.
 
 ### Three layers
 
@@ -9,6 +9,7 @@ The schema is intentionally minimal — seven tables is the smallest set that co
 - `support_plan_goals` — their authorized goals
 - `prescribed_medications` — their standing medications
 - `staff_shift_assignments` — planned shifts (who supports whom, when, where)
+- `service_locations` — billing attributes per location (rendering NPI + modifiers); source for Pipeline B's claim
 
 **Capture layer (written during/after a shift):**
 - `documented_care_sessions` — the documented shift = the progress note
@@ -39,6 +40,7 @@ create table care_recipients (
   date_of_birth            date         not null,
   waiver_program           text         not null default 'Comprehensive',
   primary_diagnosis_code   text         not null,
+  sex                      char(1)      not null check (sex in ('M', 'F', 'U')),  -- required by Pipeline B for the claim
   record_created_at        timestamptz  not null default now()
 );
 create index idx_care_recipients_medicaid_id on care_recipients(medicaid_id);
@@ -74,12 +76,24 @@ create index idx_prescribed_medications_recipient on prescribed_medications(care
 create index idx_prescribed_medications_active on prescribed_medications(care_recipient_id, is_currently_active);
 
 
+-- service_locations: billing attributes per location (source for Pipeline B; not shown to the DSP)
+create table service_locations (
+  location_id              uuid         primary key default uuid_generate_v4(),
+  service_location_name    text         not null unique,
+  rendering_npi            varchar(10)  not null,
+  modifier_1               varchar(10)  not null,
+  modifier_2               varchar(10),
+  modifier_3               varchar(10),
+  record_created_at        timestamptz  not null default now()
+);
+
+
 -- TABLE 4: staff_shift_assignments
 create table staff_shift_assignments (
   shift_assignment_id              uuid         primary key default uuid_generate_v4(),
   care_recipient_id                uuid         not null references care_recipients(care_recipient_id) on delete cascade,
   direct_support_professional_name text         not null,
-  service_location_name            text         not null,
+  location_id                      uuid         not null references service_locations(location_id) on delete restrict,
   shift_date                       date         not null,
   scheduled_start_time             time         not null,
   scheduled_end_time               time         not null,

@@ -62,6 +62,25 @@ CREATE TABLE public.care_recipients (
     date_of_birth date NOT NULL,
     waiver_program text DEFAULT 'Comprehensive'::text NOT NULL,
     primary_diagnosis_code text NOT NULL,
+    sex character(1) NOT NULL,  -- 'M', 'F', or 'U'; required by Pipeline B for the claim
+    record_created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT care_recipients_sex_check CHECK (sex IN ('M', 'F', 'U'))
+);
+
+
+--
+-- Name: service_locations; Type: TABLE; Schema: public; Owner: -
+-- Billing attributes per service location. Source of rendering_npi + modifiers
+-- that Pipeline B uses for the claim. Not shown to the DSP.
+--
+
+CREATE TABLE public.service_locations (
+    location_id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
+    service_location_name text NOT NULL,
+    rendering_npi character varying(10) NOT NULL,
+    modifier_1 character varying(10) NOT NULL,
+    modifier_2 character varying(10),
+    modifier_3 character varying(10),
     record_created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
@@ -163,7 +182,7 @@ CREATE TABLE public.staff_shift_assignments (
     shift_assignment_id uuid DEFAULT public.uuid_generate_v4() NOT NULL,
     care_recipient_id uuid NOT NULL,
     direct_support_professional_name text NOT NULL,
-    service_location_name text NOT NULL,
+    location_id uuid NOT NULL,
     shift_date date NOT NULL,
     scheduled_start_time time without time zone NOT NULL,
     scheduled_end_time time without time zone NOT NULL,
@@ -249,6 +268,22 @@ ALTER TABLE ONLY public.prescribed_medications
 
 ALTER TABLE ONLY public.staff_shift_assignments
     ADD CONSTRAINT staff_shift_assignments_pkey PRIMARY KEY (shift_assignment_id);
+
+
+--
+-- Name: service_locations service_locations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.service_locations
+    ADD CONSTRAINT service_locations_pkey PRIMARY KEY (location_id);
+
+
+--
+-- Name: service_locations service_locations_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.service_locations
+    ADD CONSTRAINT service_locations_name_key UNIQUE (service_location_name);
 
 
 --
@@ -439,6 +474,14 @@ ALTER TABLE ONLY public.prescribed_medications
 
 ALTER TABLE ONLY public.staff_shift_assignments
     ADD CONSTRAINT staff_shift_assignments_care_recipient_id_fkey FOREIGN KEY (care_recipient_id) REFERENCES public.care_recipients(care_recipient_id) ON DELETE CASCADE;
+
+
+--
+-- Name: staff_shift_assignments staff_shift_assignments_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.staff_shift_assignments
+    ADD CONSTRAINT staff_shift_assignments_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.service_locations(location_id) ON DELETE RESTRICT;
 
 
 --
