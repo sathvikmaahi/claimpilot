@@ -1,8 +1,9 @@
 """Agent instruction prompts, kept separate from agent code.
 
 Edit the .md files in this folder to change an agent's behavior — no need to
-touch agent.py. Templates use Python str.format placeholders (e.g. {goals_text})
-that the agent builder fills in at call time.
+touch agent.py. Templates use placeholder tokens (e.g. {goals_text}) that the
+agent builder substitutes via str.replace at call time. (We use replace, not
+str.format, so literal JSON braces in the prompt are left untouched.)
 """
 
 from pathlib import Path

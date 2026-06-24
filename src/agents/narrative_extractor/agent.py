@@ -46,7 +46,7 @@ def build_narrative_extractor(goals_text: str) -> Agent:
         model="gemini-2.5-flash",
         name="narrative_extractor",
         description="Extracts structured activity-narrative data from a DSP shift narration.",
-        instruction=load_prompt("narrative_extractor").format(goals_text=goals_text),
+        instruction=load_prompt("narrative_extractor").replace("{goals_text}", goals_text),
         output_schema=NarrativeExtraction,
     )
 

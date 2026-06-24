@@ -26,7 +26,7 @@ def build_observation_extractor(field: str) -> Agent:
         model="gemini-2.5-flash",
         name=f"observation_extractor_{field}",
         description="Extracts a single observation field from a short DSP narration.",
-        instruction=load_prompt("observation_extractor").format(field_guidance=FIELD_GUIDANCE[field]),
+        instruction=load_prompt("observation_extractor").replace("{field_guidance}", FIELD_GUIDANCE[field]),
         output_schema=Observation,
         generate_content_config=types.GenerateContentConfig(
             # Single-field extraction needs little reasoning; a small thinking budget

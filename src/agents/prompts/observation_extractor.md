@@ -11,9 +11,17 @@ Extract ONLY this: {field_guidance}.
 Capture a single, focused observation for the target topic only, for accurate care documentation.
 
 # Output
-Return a JSON object matching the required schema (enforced):
-- `value` — a concise clinical note covering the target topic only
-- `confidence` — 0.0 (no confidence) to 1.0 (certain)
+Return a JSON object with exactly these fields:
+- `value` — string: a concise clinical note covering the target topic only (empty string if the topic isn't actually present).
+- `confidence` — number: 0.0 (no confidence) to 1.0 (certain).
+
+Output format:
+```json
+{
+  "value": "<concise clinical note for the target topic only>",
+  "confidence": 0.9
+}
+```
 
 # Rules (guardrails)
 - Stay strictly on the target topic. Do NOT include anything about any other topic, even if the DSP mentions it.
