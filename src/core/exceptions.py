@@ -31,3 +31,7 @@ class ValidationFailedError(Exception):
 
 class ClaimBuildError(Exception):
     """Raised when the Claim Builder agent cannot produce a valid 837P EDI file."""
+
+
+class DatabaseUnavailableError(Exception):
+    """Raised when a Cloud SQL query fails due to a connection or driver-level error."""

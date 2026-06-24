@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_db, get_http_client, get_settings
 from core.config import Settings
-from core.exceptions import AuthAPIUnavailableError, ServiceEventNotFoundError
+from core.exceptions import AuthAPIUnavailableError, DatabaseUnavailableError, ServiceEventNotFoundError
 from schemas.service_event import EnrichedServiceEvent
 from services.fetch_service import fetch_service_event
 
@@ -20,6 +20,7 @@ router = APIRouter()
     responses={
         404: {"description": "No documented_care_sessions record found for this service_event_id."},
         502: {"description": "Mock Medicaid authorization API is unreachable or timed out."},
+        503: {"description": "Cloud SQL query failed — database unavailable."},
     },
 )
 async def fetch_event(
@@ -50,3 +51,5 @@ async def fetch_event(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except AuthAPIUnavailableError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except DatabaseUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc

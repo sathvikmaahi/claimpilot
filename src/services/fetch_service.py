@@ -15,9 +15,10 @@ import uuid
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.exceptions import AuthAPIUnavailableError, ServiceEventNotFoundError
+from core.exceptions import AuthAPIUnavailableError, DatabaseUnavailableError, ServiceEventNotFoundError
 from db.models.pipeline_a import (
     CareRecipient,
     DocumentedCareSession,
@@ -55,19 +56,25 @@ async def fetch_service_event(
     Output: EnrichedServiceEvent merging all Pipeline A data with patient authorization.
     """
     # 1 — Main join: documented_care_sessions + staff_shift_assignments + care_recipients
-    result = await db.execute(
-        select(DocumentedCareSession, StaffShiftAssignment, CareRecipient)
-        .join(
-            StaffShiftAssignment,
-            DocumentedCareSession.shift_assignment_id == StaffShiftAssignment.shift_assignment_id,
+    try:
+        result = await db.execute(
+            select(DocumentedCareSession, StaffShiftAssignment, CareRecipient)
+            .join(
+                StaffShiftAssignment,
+                DocumentedCareSession.shift_assignment_id == StaffShiftAssignment.shift_assignment_id,
+            )
+            .join(
+                CareRecipient,
+                DocumentedCareSession.care_recipient_id == CareRecipient.care_recipient_id,
+            )
+            .where(DocumentedCareSession.care_session_id == service_event_id)
         )
-        .join(
-            CareRecipient,
-            DocumentedCareSession.care_recipient_id == CareRecipient.care_recipient_id,
-        )
-        .where(DocumentedCareSession.care_session_id == service_event_id)
-    )
-    row = result.one_or_none()
+        row = result.one_or_none()
+    except SQLAlchemyError as exc:
+        raise DatabaseUnavailableError(
+            f"DB query failed for service_event_id={service_event_id}: {exc}"
+        ) from exc
+
     if row is None:
         raise ServiceEventNotFoundError(
             f"No documented_care_sessions record found for service_event_id={service_event_id}"
@@ -77,23 +84,33 @@ async def fetch_service_event(
     # 2 — Resolve ISP goal UUIDs → goal descriptions (skipped when no goals recorded)
     goal_descriptions: list[str] = []
     if session.goals_addressed_in_session:
-        goal_result = await db.execute(
-            select(SupportPlanGoal.goal_description)
-            .where(SupportPlanGoal.goal_id.in_(session.goals_addressed_in_session))
-            .where(SupportPlanGoal.is_currently_active.is_(True))
-        )
-        goal_descriptions = list(goal_result.scalars().all())
+        try:
+            goal_result = await db.execute(
+                select(SupportPlanGoal.goal_description)
+                .where(SupportPlanGoal.goal_id.in_(session.goals_addressed_in_session))
+                .where(SupportPlanGoal.is_currently_active.is_(True))
+            )
+            goal_descriptions = list(goal_result.scalars().all())
+        except SQLAlchemyError as exc:
+            raise DatabaseUnavailableError(
+                f"Goals query failed for service_event_id={service_event_id}: {exc}"
+            ) from exc
 
     # 3 — MAR records joined with prescribed_medications (empty list is valid)
-    mar_result = await db.execute(
-        select(MedicationAdministrationRecord, PrescribedMedication)
-        .join(
-            PrescribedMedication,
-            MedicationAdministrationRecord.medication_id == PrescribedMedication.medication_id,
+    try:
+        mar_result = await db.execute(
+            select(MedicationAdministrationRecord, PrescribedMedication)
+            .join(
+                PrescribedMedication,
+                MedicationAdministrationRecord.medication_id == PrescribedMedication.medication_id,
+            )
+            .where(MedicationAdministrationRecord.care_session_id == service_event_id)
         )
-        .where(MedicationAdministrationRecord.care_session_id == service_event_id)
-    )
-    mar_rows = list(mar_result.all())
+        mar_rows = list(mar_result.all())
+    except SQLAlchemyError as exc:
+        raise DatabaseUnavailableError(
+            f"MAR query failed for service_event_id={service_event_id}: {exc}"
+        ) from exc
 
     # 4 — Mock Medicaid authorization API
     try:
