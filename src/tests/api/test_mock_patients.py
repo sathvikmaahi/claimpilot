@@ -3,10 +3,10 @@ def test_mock_patients_returns_200(client):
     assert response.status_code == 200
 
 
-def test_mock_patients_returns_all_six(client):
+def test_mock_patients_returns_all_seven(client):
     response = client.get("/mock-patients")
     data = response.json()
-    assert len(data) == 6
+    assert len(data) == 7
 
 
 def test_mock_patients_have_required_fields(client):
