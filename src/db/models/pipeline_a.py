@@ -12,9 +12,8 @@ class CareRecipient(Base):
     """
     Pipeline A care_recipients table — one row per individual served.
     Provides participant_name (full_name), participant_dcn (medicaid_id),
-    participant_dob, diagnosis_code, and waiver_identifier.
+    participant_dob, diagnosis_code, waiver_identifier, and sex.
     Read-only from Pipeline B's perspective.
-    PENDING — friend to add: sex CHAR(1) M/F/U needed for 837P DMG segment.
     """
     __tablename__ = "care_recipients"
 
@@ -24,16 +23,15 @@ class CareRecipient(Base):
     date_of_birth: Mapped[date] = mapped_column(Date)               # → participant_dob
     waiver_program: Mapped[str] = mapped_column(Text)               # → waiver_identifier
     primary_diagnosis_code: Mapped[str] = mapped_column(Text)       # → diagnosis_code (ICD-10)
+    sex: Mapped[str] = mapped_column(String(1))  # → sex ('M', 'F', 'U') — 837P DMG03
     record_created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
-    # sex: Mapped[str] = mapped_column(String(1))  # PENDING: friend to add — needed for 837P DMG segment
 
 
 class StaffShiftAssignment(Base):
     """
     Pipeline A staff_shift_assignments table — one row per scheduled DSP shift.
-    Provides service_date (shift_date), service_location (service_location_name),
-    provider_name (direct_support_professional_name), and procedure_code (service_billing_code).
-    PENDING — friend to add: rendering_npi, modifier_1/2/3 (needed for 837P SV1 + Loop 2310B).
+    Provides service_date, service_location, provider_name, procedure_code,
+    rendering_npi, and modifiers for 837P SV1 + Loop 2310B.
     """
     __tablename__ = "staff_shift_assignments"
 
@@ -41,17 +39,17 @@ class StaffShiftAssignment(Base):
     care_recipient_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("care_recipients.care_recipient_id")
     )
-    direct_support_professional_name: Mapped[str] = mapped_column(Text)    # → provider_name
-    service_location_name: Mapped[str] = mapped_column(Text)               # → service_location (ISL home → 837P CLM05)
-    shift_date: Mapped[date] = mapped_column(Date)                         # → service_date
+    direct_support_professional_name: Mapped[str] = mapped_column(Text)   # → provider_name
+    service_location_name: Mapped[str] = mapped_column(Text)              # → service_location
+    shift_date: Mapped[date] = mapped_column(Date)                        # → service_date
     scheduled_start_time: Mapped[time] = mapped_column(Time)
     scheduled_end_time: Mapped[time] = mapped_column(Time)
-    service_billing_code: Mapped[str] = mapped_column(String(10))          # → procedure_code (e.g. T2016)
+    service_billing_code: Mapped[str] = mapped_column(String(10))         # → procedure_code
+    rendering_npi: Mapped[str] = mapped_column(String(10))                # → 837P Loop 2310B NM109
+    modifier_1: Mapped[str] = mapped_column(String(10))                   # → 837P SV101-3
+    modifier_2: Mapped[str | None] = mapped_column(String(10), nullable=True)   # → SV101-4
+    modifier_3: Mapped[str | None] = mapped_column(String(10), nullable=True)   # → SV101-5
     record_created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
-    # rendering_npi: Mapped[str | None] = mapped_column(String(10), nullable=True)  # PENDING: friend to add → 837P Loop 2310B NM109
-    # modifier_1: Mapped[str | None] = mapped_column(String(10), nullable=True)     # PENDING: friend to add → SV101-3
-    # modifier_2: Mapped[str | None] = mapped_column(String(10), nullable=True)     # PENDING: friend to add → SV101-4
-    # modifier_3: Mapped[str | None] = mapped_column(String(10), nullable=True)     # PENDING: friend to add → SV101-5
 
 
 class DocumentedCareSession(Base):

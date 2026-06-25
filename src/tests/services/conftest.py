@@ -49,6 +49,10 @@ def mock_shift() -> MagicMock:
     s.service_location_name = "Liberty House"
     s.direct_support_professional_name = "Jane Doe"
     s.service_billing_code = "T2016"
+    s.rendering_npi = "1234567890"
+    s.modifier_1 = "U1"
+    s.modifier_2 = None
+    s.modifier_3 = None
     return s
 
 
@@ -61,6 +65,7 @@ def mock_recipient() -> MagicMock:
     r.date_of_birth = date(1982, 3, 14)
     r.waiver_program = "Comprehensive"
     r.primary_diagnosis_code = "F70"
+    r.sex = "M"
     return r
 
 

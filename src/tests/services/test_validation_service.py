@@ -32,6 +32,7 @@ def make_event(**overrides) -> EnrichedServiceEvent:
         participant_name="John Smith",
         participant_dcn="MO100001",
         participant_dob=date(1982, 3, 14),
+        sex="M",
         service_date=date(2026, 6, 10),
         begin_time=time(7, 0, 0),
         end_time=time(15, 0, 0),

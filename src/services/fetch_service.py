@@ -146,17 +146,17 @@ async def fetch_service_event(
         participant_name=recipient.full_name,
         participant_dcn=recipient.medicaid_id,
         participant_dob=recipient.date_of_birth,
-        sex=None,  # PENDING: recipient.sex — friend to add sex column to care_recipients
+        sex=recipient.sex,
 
         # from staff_shift_assignments
         service_date=shift.shift_date,
         service_location=shift.service_location_name,
         provider_name=shift.direct_support_professional_name,
         procedure_code=shift.service_billing_code,
-        rendering_npi=None,   # PENDING: shift.rendering_npi — friend to add to staff_shift_assignments
-        modifier_1=None,      # PENDING: shift.modifier_1 — friend to add to staff_shift_assignments
-        modifier_2=None,      # PENDING: shift.modifier_2 — friend to add to staff_shift_assignments
-        modifier_3=None,      # PENDING: shift.modifier_3 — friend to add to staff_shift_assignments
+        rendering_npi=shift.rendering_npi,
+        modifier_1=shift.modifier_1,
+        modifier_2=shift.modifier_2,
+        modifier_3=shift.modifier_3,
 
         # from documented_care_sessions
         begin_time=session.actual_clock_in_time.time() if session.actual_clock_in_time else None,
