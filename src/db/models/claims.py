@@ -43,7 +43,7 @@ class Claim(Base):
     validation_failure_check: Mapped[int | None] = mapped_column(Integer, nullable=True)
     validation_failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    file_837p_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    file_837p_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
     clerk_reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     clerk_review_timestamp: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
