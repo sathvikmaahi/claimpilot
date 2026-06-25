@@ -24,6 +24,7 @@ from db.models.pipeline_a import (
     DocumentedCareSession,
     MedicationAdministrationRecord,
     PrescribedMedication,
+    ServiceLocation,
     StaffShiftAssignment,
     SupportPlanGoal,
 )
@@ -58,10 +59,14 @@ async def fetch_service_event(
     # 1 — Main join: documented_care_sessions + staff_shift_assignments + care_recipients
     try:
         result = await db.execute(
-            select(DocumentedCareSession, StaffShiftAssignment, CareRecipient)
+            select(DocumentedCareSession, StaffShiftAssignment, ServiceLocation, CareRecipient)
             .join(
                 StaffShiftAssignment,
                 DocumentedCareSession.shift_assignment_id == StaffShiftAssignment.shift_assignment_id,
+            )
+            .join(
+                ServiceLocation,
+                StaffShiftAssignment.location_id == ServiceLocation.location_id,
             )
             .join(
                 CareRecipient,
@@ -79,7 +84,7 @@ async def fetch_service_event(
         raise ServiceEventNotFoundError(
             f"No documented_care_sessions record found for service_event_id={service_event_id}"
         )
-    session, shift, recipient = row
+    session, shift, location, recipient = row
 
     # 2 — Resolve ISP goal UUIDs → goal descriptions (skipped when no goals recorded)
     goal_descriptions: list[str] = []
@@ -148,15 +153,15 @@ async def fetch_service_event(
         participant_dob=recipient.date_of_birth,
         sex=recipient.sex,
 
-        # from staff_shift_assignments
+        # from staff_shift_assignments + service_locations
         service_date=shift.shift_date,
-        service_location=shift.service_location_name,
+        service_location=location.service_location_name,
         provider_name=shift.direct_support_professional_name,
         procedure_code=shift.service_billing_code,
-        rendering_npi=shift.rendering_npi,
-        modifier_1=shift.modifier_1,
-        modifier_2=shift.modifier_2,
-        modifier_3=shift.modifier_3,
+        rendering_npi=location.rendering_npi,
+        modifier_1=location.modifier_1,
+        modifier_2=location.modifier_2,
+        modifier_3=location.modifier_3,
 
         # from documented_care_sessions
         begin_time=session.actual_clock_in_time.time() if session.actual_clock_in_time else None,
@@ -164,7 +169,7 @@ async def fetch_service_event(
         provider_signature="signed" if session.dsp_has_signed else "unsigned",
         service_description=session.care_session_narrative or "",
         activity_time=activity_time,
-        activity_category=_BILLING_CODE_TO_CATEGORY.get(shift.service_billing_code, shift.service_billing_code),
+        activity_category=_BILLING_CODE_TO_CATEGORY.get(shift.service_billing_code),
         participation_level=session.recipient_engagement_notes or "",
         support_level=session.level_of_support_provided or "",
         goals_supported=goal_descriptions,

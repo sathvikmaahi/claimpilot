@@ -27,11 +27,28 @@ class CareRecipient(Base):
     record_created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
+class ServiceLocation(Base):
+    """
+    Pipeline A service_locations table — one row per residential/day programme site.
+    Holds the rendering NPI and modifiers used for 837P billing.
+    Linked to StaffShiftAssignment via location_id FK.
+    """
+    __tablename__ = "service_locations"
+
+    location_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    service_location_name: Mapped[str] = mapped_column(Text)              # → service_location
+    rendering_npi: Mapped[str] = mapped_column(String(10))                # → 837P Loop 2310B NM109
+    modifier_1: Mapped[str] = mapped_column(String(10))                   # → 837P SV101-3
+    modifier_2: Mapped[str | None] = mapped_column(String(10), nullable=True)   # → SV101-4
+    modifier_3: Mapped[str | None] = mapped_column(String(10), nullable=True)   # → SV101-5
+    record_created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class StaffShiftAssignment(Base):
     """
     Pipeline A staff_shift_assignments table — one row per scheduled DSP shift.
-    Provides service_date, service_location, provider_name, procedure_code,
-    rendering_npi, and modifiers for 837P SV1 + Loop 2310B.
+    Provides service_date, provider_name, procedure_code.
+    rendering_npi, modifiers, and service_location_name come from ServiceLocation via location_id.
     """
     __tablename__ = "staff_shift_assignments"
 
@@ -40,15 +57,13 @@ class StaffShiftAssignment(Base):
         PGUUID(as_uuid=True), ForeignKey("care_recipients.care_recipient_id")
     )
     direct_support_professional_name: Mapped[str] = mapped_column(Text)   # → provider_name
-    service_location_name: Mapped[str] = mapped_column(Text)              # → service_location
+    location_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("service_locations.location_id")
+    )
     shift_date: Mapped[date] = mapped_column(Date)                        # → service_date
     scheduled_start_time: Mapped[time] = mapped_column(Time)
     scheduled_end_time: Mapped[time] = mapped_column(Time)
     service_billing_code: Mapped[str] = mapped_column(String(10))         # → procedure_code
-    rendering_npi: Mapped[str] = mapped_column(String(10))                # → 837P Loop 2310B NM109
-    modifier_1: Mapped[str] = mapped_column(String(10))                   # → 837P SV101-3
-    modifier_2: Mapped[str | None] = mapped_column(String(10), nullable=True)   # → SV101-4
-    modifier_3: Mapped[str | None] = mapped_column(String(10), nullable=True)   # → SV101-5
     record_created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
 
 

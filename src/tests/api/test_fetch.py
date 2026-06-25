@@ -65,13 +65,15 @@ def _make_session_row(service_event_id: uuid.UUID) -> tuple:
 
     shift = MagicMock()
     shift.shift_date = date(2026, 6, 10)
-    shift.service_location_name = "Liberty House"
     shift.direct_support_professional_name = "Jane Doe"
     shift.service_billing_code = "T2016"
-    shift.rendering_npi = "1234567890"
-    shift.modifier_1 = "U1"
-    shift.modifier_2 = None
-    shift.modifier_3 = None
+
+    location = MagicMock()
+    location.service_location_name = "Liberty House"
+    location.rendering_npi = "1234567890"
+    location.modifier_1 = "U1"
+    location.modifier_2 = None
+    location.modifier_3 = None
 
     recipient = MagicMock()
     recipient.full_name = "John Smith"
@@ -81,7 +83,7 @@ def _make_session_row(service_event_id: uuid.UUID) -> tuple:
     recipient.primary_diagnosis_code = "F70"
     recipient.sex = "M"
 
-    return (session, shift, recipient)
+    return (session, shift, location, recipient)
 
 
 @contextmanager

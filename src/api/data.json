@@ -64,5 +64,16 @@
     "authorized_service_code": "T2016",
     "waiver_type": "Comprehensive",
     "_scenario": "Valid auth — clean pass (second patient)"
+  },
+  {
+    "patient_name": "Robert Kim",
+    "insurance_number": "499201084",
+    "patient_prior_auth_number": "AUTH-2026-00107",
+    "authorized_units": 96,
+    "validity_start_date": "2026-01-01",
+    "validity_end_date": "2026-12-31",
+    "authorized_service_code": "T2016",
+    "waiver_type": "Comprehensive",
+    "_scenario": "Valid auth — real patient from Cloud SQL"
   }
 ]

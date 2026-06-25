@@ -46,14 +46,21 @@ def mock_shift() -> MagicMock:
     """Mock StaffShiftAssignment ORM object returned as part of the main joined query."""
     s = MagicMock()
     s.shift_date = date(2026, 6, 10)
-    s.service_location_name = "Liberty House"
     s.direct_support_professional_name = "Jane Doe"
     s.service_billing_code = "T2016"
-    s.rendering_npi = "1234567890"
-    s.modifier_1 = "U1"
-    s.modifier_2 = None
-    s.modifier_3 = None
     return s
+
+
+@pytest.fixture
+def mock_location() -> MagicMock:
+    """Mock ServiceLocation ORM object joined via StaffShiftAssignment.location_id."""
+    loc = MagicMock()
+    loc.service_location_name = "Liberty House"
+    loc.rendering_npi = "1234567890"
+    loc.modifier_1 = "U1"
+    loc.modifier_2 = None
+    loc.modifier_3 = None
+    return loc
 
 
 @pytest.fixture

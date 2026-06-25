@@ -25,7 +25,7 @@ from core.exceptions import (
     DatabaseUnavailableError,
     ServiceEventNotFoundError,
 )
-from db.models.claims import Claim
+from db.models.claims import Claim, ClaimFieldsRecord
 from schemas.claim import ClaimRead
 from services.fetch_service import fetch_service_event
 
@@ -110,7 +110,8 @@ async def build_claim(
         await db.commit()
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    # 3 — Generate 837P EDI and update claim
+    # 3 — Generate DRAFT 837P for preview, persist structured fields, update claim.
+    #     Step 4 (Clerk Review) regenerates the FINAL 837P after clerk edits and confirmation.
     from decimal import Decimal
     edi_text = generate_837p(
         fields=fields,
@@ -119,8 +120,34 @@ async def build_claim(
         payer_id=settings.payer_id,
         claim_id=claim.claim_id,
     )
+    claim_fields_record = ClaimFieldsRecord(
+        claim_id=claim.claim_id,
+        subscriber_last_name=fields.subscriber_last_name,
+        subscriber_first_name=fields.subscriber_first_name,
+        subscriber_medicaid_id=fields.subscriber_medicaid_id,
+        subscriber_dob=fields.subscriber_dob,
+        subscriber_sex=fields.subscriber_sex,
+        service_date=fields.service_date,
+        service_begin_time=fields.service_begin_time,
+        service_end_time=fields.service_end_time,
+        diagnosis_code=fields.diagnosis_code,
+        diagnosis_qualifier=fields.diagnosis_qualifier,
+        place_of_service=fields.place_of_service,
+        claim_filing_indicator=fields.claim_filing_indicator,
+        rendering_npi=fields.rendering_npi,
+        procedure_code=fields.procedure_code,
+        procedure_qualifier=fields.procedure_qualifier,
+        modifier_1=fields.modifier_1,
+        modifier_2=fields.modifier_2,
+        modifier_3=fields.modifier_3,
+        service_units=fields.service_units,
+        billed_amount=fields.billed_amount,
+        taxonomy_code=fields.taxonomy_code,
+        notes=fields.notes,
+    )
+    db.add(claim_fields_record)
     claim.billed_amount = Decimal(fields.billed_amount)
-    claim.file_837p_reference = edi_text   # stored as text for POC; production would write to GCS
+    claim.file_837p_reference = edi_text
     claim.claim_status = "draft"
     await db.commit()
 
