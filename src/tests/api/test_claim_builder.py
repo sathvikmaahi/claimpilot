@@ -188,7 +188,7 @@ def test_claim_builder_returns_200_with_837p_text():
 
     with patch("api.routes.claim_builder.run_claim_builder", return_value=MOCK_FIELDS):
         with _override_deps(db_mock, http_mock) as client:
-            response = client.get(f"/api/v1/claim-builder/{_EVENT_ID}")
+            response = client.post(f"/api/v1/claim-builder/{_EVENT_ID}")
 
     assert response.status_code == 200
     data = response.json()
@@ -213,7 +213,7 @@ def test_claim_builder_returns_404_for_unknown_session():
         side_effect=ServiceEventNotFoundError(str(_EVENT_ID)),
     ):
         with _override_deps(AsyncMock(), AsyncMock()) as client:
-            response = client.get(f"/api/v1/claim-builder/{_EVENT_ID}")
+            response = client.post(f"/api/v1/claim-builder/{_EVENT_ID}")
 
     assert response.status_code == 404
     assert str(_EVENT_ID) in response.json()["detail"]
@@ -230,7 +230,7 @@ def test_claim_builder_returns_502_when_auth_api_down():
         side_effect=AuthAPIUnavailableError("http://mock-auth-api unreachable"),
     ):
         with _override_deps(AsyncMock(), AsyncMock()) as client:
-            response = client.get(f"/api/v1/claim-builder/{_EVENT_ID}")
+            response = client.post(f"/api/v1/claim-builder/{_EVENT_ID}")
 
     assert response.status_code == 502
 
@@ -246,7 +246,7 @@ def test_claim_builder_returns_503_when_db_unavailable():
         side_effect=DatabaseUnavailableError("Cloud SQL unavailable"),
     ):
         with _override_deps(AsyncMock(), AsyncMock()) as client:
-            response = client.get(f"/api/v1/claim-builder/{_EVENT_ID}")
+            response = client.post(f"/api/v1/claim-builder/{_EVENT_ID}")
 
     assert response.status_code == 503
 
@@ -266,7 +266,7 @@ def test_claim_builder_returns_500_and_marks_draft_failed_when_agent_fails():
         side_effect=ClaimBuildError("Gemini quota exceeded after 3 attempts"),
     ):
         with _override_deps(db_mock, http_mock) as client:
-            response = client.get(f"/api/v1/claim-builder/{_EVENT_ID}")
+            response = client.post(f"/api/v1/claim-builder/{_EVENT_ID}")
 
     assert response.status_code == 500
     assert "Gemini quota exceeded" in response.json()["detail"]

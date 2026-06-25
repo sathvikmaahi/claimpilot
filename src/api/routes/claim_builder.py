@@ -48,7 +48,7 @@ def _make_claim_read(claim: Claim) -> ClaimRead:
     )
 
 
-@router.get(
+@router.post(
     "/claim-builder/{service_event_id}",
     response_model=ClaimRead,
     status_code=200,
