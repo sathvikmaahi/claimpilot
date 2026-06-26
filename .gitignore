@@ -27,3 +27,6 @@ htmlcov/
 .adk/
 *.m4a
 pytest_run.log
+
+# Local verification fixtures — sample form photos (PHI-shaped, not for the repo)
+src/scripts/sample_pages_/
