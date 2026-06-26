@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import ForeignKey, Integer, String, Numeric, Text, TIMESTAMP, func
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Numeric, Text, TIMESTAMP, func
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,7 +43,53 @@ class Claim(Base):
     validation_failure_check: Mapped[int | None] = mapped_column(Integer, nullable=True)
     validation_failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    file_837p_reference: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    file_837p_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
     clerk_reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
     clerk_review_timestamp: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class ClaimFieldsRecord(Base):
+    """
+    Pipeline B claim_fields table — structured 837P fields produced by the Claim Builder agent.
+    One-to-one with claims (same claim_id). Stored separately so Step 4 (Clerk Review) can
+    read and edit individual fields without parsing the raw EDI text.
+    """
+    __tablename__ = "claim_fields"
+
+    claim_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("claims.claim_id"),
+        primary_key=True,
+    )
+
+    # Loop 2000B — Subscriber
+    subscriber_last_name: Mapped[str] = mapped_column(Text)
+    subscriber_first_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subscriber_medicaid_id: Mapped[str] = mapped_column(Text)
+    subscriber_dob: Mapped[str] = mapped_column(String(8))         # YYYYMMDD
+    subscriber_sex: Mapped[str] = mapped_column(String(1))
+
+    # Loop 2300 — Claim
+    service_date: Mapped[str] = mapped_column(String(8))           # YYYYMMDD
+    service_begin_time: Mapped[str | None] = mapped_column(String(4), nullable=True)  # HHMM
+    service_end_time: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    diagnosis_code: Mapped[str] = mapped_column(Text)
+    diagnosis_qualifier: Mapped[str] = mapped_column(String(3))
+    place_of_service: Mapped[str] = mapped_column(String(2))
+    claim_filing_indicator: Mapped[str] = mapped_column(String(2))
+
+    # Loop 2310B — Rendering Provider
+    rendering_npi: Mapped[str] = mapped_column(String(10))
+
+    # Loop 2400 — Service Line
+    procedure_code: Mapped[str] = mapped_column(String(10))
+    procedure_qualifier: Mapped[str] = mapped_column(String(2))
+    modifier_1: Mapped[str] = mapped_column(String(10))
+    modifier_2: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    modifier_3: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    service_units: Mapped[int] = mapped_column(Integer)
+    billed_amount: Mapped[str] = mapped_column(String(12))         # "0.00" string as agent produced
+    taxonomy_code: Mapped[str] = mapped_column(String(10))
+
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)

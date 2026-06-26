@@ -14,6 +14,7 @@ async def test_fetch_success(
     service_event_id,
     mock_session,
     mock_shift,
+    mock_location,
     mock_recipient,
     mock_mar_pair,
     auth_response_data,
@@ -22,10 +23,9 @@ async def test_fetch_success(
     Input: All joined tables populated, auth API returns valid data.
     Description: Happy path — fetch returns a fully populated EnrichedServiceEvent
                  with one MAR record and authorization details from the mock API.
-                 rendering_npi and modifier_1 are None (PENDING: friend to add to schema).
     Output: EnrichedServiceEvent with correct participant_name, procedure_code, and auth number.
     """
-    session_row = (mock_session, mock_shift, mock_recipient)
+    session_row = (mock_session, mock_shift, mock_location, mock_recipient)
     db = make_db_mock(session_row, mar_pairs=[mock_mar_pair])
     http = make_http_mock(auth_response_data)
 
@@ -34,8 +34,9 @@ async def test_fetch_success(
     assert isinstance(result, EnrichedServiceEvent)
     assert result.participant_name == "John Smith"
     assert result.procedure_code == "T2016"
-    assert result.modifier_1 is None        # PENDING: friend to add to staff_shift_assignments
-    assert result.rendering_npi is None     # PENDING: friend to add to staff_shift_assignments
+    assert result.modifier_1 == "U1"
+    assert result.rendering_npi == "1234567890"
+    assert result.sex == "M"
     assert result.authorization.patient_prior_auth_number == "AUTH-2026-00101"
     assert len(result.mar_records) == 1
     assert result.mar_records[0].med_name == "Metformin"
@@ -70,6 +71,7 @@ async def test_fetch_with_goals_resolution(
     service_event_id,
     mock_session,
     mock_shift,
+    mock_location,
     mock_recipient,
     auth_response_data,
 ):
@@ -83,7 +85,7 @@ async def test_fetch_with_goals_resolution(
     Output: EnrichedServiceEvent with goals_supported populated from the goals query.
     """
     mock_session.goals_addressed_in_session = [uuid4(), uuid4()]  # non-empty triggers goals query
-    session_row = (mock_session, mock_shift, mock_recipient)
+    session_row = (mock_session, mock_shift, mock_location, mock_recipient)
 
     goal_texts = [
         "Develop independence in morning ADL routine with minimal prompting",
@@ -103,6 +105,7 @@ async def test_fetch_empty_mar(
     service_event_id,
     mock_session,
     mock_shift,
+    mock_location,
     mock_recipient,
     auth_response_data,
 ):
@@ -112,7 +115,7 @@ async def test_fetch_empty_mar(
                  Should return EnrichedServiceEvent with mar_records=[].
     Output: EnrichedServiceEvent with empty mar_records list.
     """
-    session_row = (mock_session, mock_shift, mock_recipient)
+    session_row = (mock_session, mock_shift, mock_location, mock_recipient)
     db = make_db_mock(session_row, mar_pairs=[])
     http = make_http_mock(auth_response_data)
 
@@ -127,6 +130,7 @@ async def test_fetch_auth_api_unreachable(
     service_event_id,
     mock_session,
     mock_shift,
+    mock_location,
     mock_recipient,
     mock_mar_pair,
 ):
@@ -136,7 +140,7 @@ async def test_fetch_auth_api_unreachable(
                  The original ConnectError is chained as the cause.
     Output: AuthAPIUnavailableError with the auth API URL in the message.
     """
-    session_row = (mock_session, mock_shift, mock_recipient)
+    session_row = (mock_session, mock_shift, mock_location, mock_recipient)
     db = make_db_mock(session_row, mar_pairs=[mock_mar_pair])
     http = make_http_mock(raise_exc=httpx.ConnectError("Connection refused"))
 
@@ -150,6 +154,7 @@ async def test_fetch_auth_api_timeout(
     service_event_id,
     mock_session,
     mock_shift,
+    mock_location,
     mock_recipient,
     mock_mar_pair,
 ):
@@ -158,7 +163,7 @@ async def test_fetch_auth_api_timeout(
     Description: A timed-out auth API request should also raise AuthAPIUnavailableError.
     Output: AuthAPIUnavailableError.
     """
-    session_row = (mock_session, mock_shift, mock_recipient)
+    session_row = (mock_session, mock_shift, mock_location, mock_recipient)
     db = make_db_mock(session_row, mar_pairs=[mock_mar_pair])
     http = make_http_mock(raise_exc=httpx.TimeoutException("Request timed out"))
 

@@ -2,7 +2,10 @@ from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
 import httpx
+from dotenv import load_dotenv
 from fastapi import FastAPI
+
+load_dotenv()
 
 from api.router import router
 from api.routes import fetch, validate, claim_builder, clerk_review

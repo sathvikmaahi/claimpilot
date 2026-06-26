@@ -29,8 +29,6 @@ class EnrichedServiceEvent(BaseModel):
            + mock Medicaid authorization API response.
     Description: The fully enriched service event produced by Step 1 (Fetch).
                  Contains all fields needed by Step 2 (Validate) and Step 3 (Claim Builder).
-                 Fields marked PENDING are None until the friend adds them to schema.sql;
-                 rendering_npi being None will correctly trigger Check 5 → review queue.
     Output: Returned by GET /api/v1/fetch/{service_event_id}. Consumed by Step 2.
     """
     # --- identity (documented_care_sessions.care_session_id) ---
@@ -40,17 +38,17 @@ class EnrichedServiceEvent(BaseModel):
     participant_name: str
     participant_dcn: str
     participant_dob: date
-    sex: str | None = None                # PENDING: friend to add sex column to care_recipients (837P DMG03)
+    sex: str                              # 'M', 'F', or 'U' — 837P DMG03
 
     # --- from staff_shift_assignments ---
     service_date: date
     service_location: str
     provider_name: str
     procedure_code: str
-    rendering_npi: str | None = None      # PENDING: friend to add to staff_shift_assignments (837P Loop 2310B NM109)
-    modifier_1: str | None = None         # PENDING: friend to add to staff_shift_assignments (837P SV101-3)
-    modifier_2: str | None = None         # PENDING: friend to add to staff_shift_assignments (837P SV101-4)
-    modifier_3: str | None = None         # PENDING: friend to add to staff_shift_assignments (837P SV101-5)
+    rendering_npi: str                    # 837P Loop 2310B NM109
+    modifier_1: str                       # 837P SV101-3
+    modifier_2: str | None = None         # 837P SV101-4 (optional)
+    modifier_3: str | None = None         # 837P SV101-5 (optional)
 
     # --- from documented_care_sessions ---
     begin_time: time | None = None        # actual_clock_in_time.time() — None if clock-in not recorded
