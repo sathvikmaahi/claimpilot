@@ -38,6 +38,10 @@ build-backend = "hatchling.build"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["."]
+# Integration tests (live Gemini + Cloud SQL + local audio fixtures) are opt-in:
+# the default run skips them so the full project suite is green without that
+# setup. Run them explicitly with:  pytest -m integration
+addopts = ["-m", "not integration"]
 markers = [
     "integration: end-to-end test that calls live Gemini + Cloud SQL (slow, uses quota)",
 ]

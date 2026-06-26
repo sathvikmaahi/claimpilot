@@ -13,6 +13,10 @@ from psycopg2.extras import RealDictCursor
 
 MARCUS_MEDICAID_ID = "482910053"
 
+# Local audio fixture this integration test needs (gitignored — present only on
+# machines set up to run the voice pipeline). Used to skip cleanly if absent.
+_NARRATION_CLIP = os.path.join(here, "..", "..", "agents", "narrative_extractor", "section1.m4a")
+
 
 def _read(path):
     with open(os.path.join(here, "..", "..", "agents", path), "rb") as f:
@@ -50,6 +54,10 @@ def count_mar(care_session_id):
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not os.path.exists(_NARRATION_CLIP) or not os.environ.get("CLOUD_SQL_HOST"),
+    reason="integration prerequisites missing (audio fixture or Cloud SQL creds)",
+)
 def test_full_pipeline_write():
     """End-to-end: extract -> write_session (note + MAR atomically) -> read back -> clean up."""
     new_id = None

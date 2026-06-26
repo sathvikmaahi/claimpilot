@@ -20,6 +20,10 @@ CLIP = os.path.join(here, "..", "..", "..", "transcript_test.m4a")
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not os.path.exists(CLIP) or not os.environ.get("GOOGLE_CLOUD_PROJECT"),
+    reason="integration prerequisites missing (audio fixture or Gemini creds)",
+)
 def test_transcribe_returns_text():
     with open(CLIP, "rb") as f:
         audio = f.read()
