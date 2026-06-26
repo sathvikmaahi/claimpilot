@@ -11,6 +11,7 @@ Stage 2 adds extract() — the read + LLM path. It performs NO database writes.
 
 import json
 import asyncio as _asyncio
+import datetime as _dt
 
 from google.adk.runners import InMemoryRunner
 from google.genai import types
@@ -22,6 +23,8 @@ from db.voice_session import get_session
 from agents.narrative_extractor.agent import build_narrative_extractor
 from agents.narrative_extractor.detect_gaps import detect_gaps
 from agents.observation_extractor.agent import build_observation_extractor
+from agents.progress_note_extractor.agent import build_progress_note_extractor
+from infra.storage import upload_progress_note_pages
 
 from core.observability import get_logger, kv, timed
 
@@ -202,8 +205,97 @@ async def extract(medicaid_id: str,
                 gaps=len(section1.get("gaps_detected", [])),
                 mar_meds=len(result["mar_scaffold"])))
     return result
-    
-    
+
+
+async def _run_progress_note(goals_text: str, pages: list[tuple[bytes, str]]) -> dict:
+    """Run the single Progress Note vision agent over ALL page images at once.
+
+    `pages` is an ordered list of (image_bytes, mime_type) — page 1 first. They
+    are fed to ONE agent call as ordered image parts (the multi-page form is one
+    document), exactly as _run_section1 feeds two audio clips to one agent.
+    """
+    agent = build_progress_note_extractor(goals_text)
+    runner = InMemoryRunner(agent=agent, app_name=APP_NAME)
+    session = await runner.session_service.create_session(
+        app_name=APP_NAME, user_id=USER_ID
+    )
+    parts = [types.Part.from_bytes(data=data, mime_type=mime) for data, mime in pages]
+    message = types.Content(role="user", parts=parts)
+
+    async def _run():
+        text = None
+        async for event in runner.run_async(
+            user_id=USER_ID, session_id=session.id, new_message=message
+        ):
+            if event.is_final_response() and event.content:
+                text = event.content.parts[0].text
+        return json.loads(text)
+
+    return await _with_retry(_run)
+
+
+async def extract_image(medicaid_id: str, pages: list[tuple[bytes, str]]) -> dict:
+    """The image READ path. Loads context, persists the source pages to GCS,
+    runs the one vision agent, detects gaps, assembles the result. Performs NO
+    database writes (the care-session write still happens later via /submit).
+
+    Mirrors extract() so the frontend renders the SAME review form: returns the
+    same four blocks (auto_fields, progress_note, mar_scaffold, active_goals)
+    plus meals/personal_care (pre-filled from the form's S10/S11 checkboxes) and
+    source_image_uris (the stored pages, for linkage at /submit).
+    """
+    log.info(kv(event="extract_image_start", medicaid_id=medicaid_id, pages=len(pages)))
+
+    # 1. One DB read for everything both documents need (header, goals, meds, shift).
+    ctx = load_context(medicaid_id)
+
+    # 2. Persist the source pages FIRST, so the original paper form is retained
+    #    even if extraction later fails. The shift is today's (DB filters current_date).
+    shift_date = _dt.date.today().isoformat()
+    stored = upload_progress_note_pages(medicaid_id, shift_date, pages)
+
+    # 3. One vision agent reads ALL pages -> the Section-1/2 note shape.
+    with timed("progress_note_llm", logger=log):
+        extraction = await _run_progress_note(ctx["goals_text"], pages)
+
+    # 4. Split the agent output: the Section 2 observations + the tap-style
+    #    meals/personal_care ride OUTSIDE progress_note (matching the voice shape),
+    #    everything else IS the progress_note (same fields as narrative_extractor).
+    section2 = {
+        "health_observations": extraction.pop("health_observations", None),
+        "behavioral_observations": extraction.pop("behavioral_observations", None),
+        "community_outing": extraction.pop("community_outing", None),
+    }
+    meals = extraction.pop("meals", []) or []
+    personal_care = extraction.pop("personal_care", []) or []
+    section1 = extraction
+
+    # 5. Gap detection — the same deterministic Python the voice path uses.
+    section1["gaps_detected"] = detect_gaps(section1, ctx["shift"], ctx["medications"])
+
+    # 6. Fold observations into the contract key the frontend + /submit expect.
+    section1["extracted_fields_section2"] = section2
+
+    # 7. Assemble — the four voice blocks, plus meals/personal_care + stored URIs.
+    result = {
+        "auto_fields": ctx["auto_fields"],
+        "progress_note": section1,
+        "mar_scaffold": _build_mar_scaffold(ctx, section1.get("transcript", "")),
+        "active_goals": _build_active_goals(ctx, section1.get("isp_goals_addressed", [])),
+        "meals": meals,
+        "personal_care": personal_care,
+        "source_image_uris": stored["uris"],
+    }
+
+    log.info(kv(event="extract_image_done", medicaid_id=medicaid_id,
+                activities=len(section1.get("activities_performed", [])),
+                goals=len(section1.get("isp_goals_addressed", [])),
+                gaps=len(section1.get("gaps_detected", [])),
+                mar_meds=len(result["mar_scaffold"]),
+                pages=len(stored["uris"])))
+    return result
+
+
 def _build_active_goals(ctx: dict, matched_goals: list) -> list[dict]:
     """Build the full active-goal list for the frontend's resolution checklist.
 
