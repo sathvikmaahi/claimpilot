@@ -9,7 +9,7 @@ from api.routes import fetch, validate, claim_builder, clerk_review
 from core.logging import setup_logging
 
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import extract, submit, transcribe, roster
+from api.routes import extract, submit, transcribe, roster, extract_image
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -53,3 +53,4 @@ app.include_router(extract.router, prefix="/api/v1", tags=["extract"])
 app.include_router(submit.router, prefix="/api/v1", tags=["submit"])
 app.include_router(transcribe.router, prefix="/api/v1", tags=["transcribe"])
 app.include_router(roster.router, prefix="/api/v1", tags=["roster"])
+app.include_router(extract_image.router, prefix="/api/v1", tags=["extract-image"])

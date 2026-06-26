@@ -234,6 +234,44 @@ async def _run_progress_note(goals_text: str, pages: list[tuple[bytes, str]]) ->
     return await _with_retry(_run)
 
 
+def _degraded_result(ctx: dict, stored: dict) -> dict:
+    """Build a usable review screen when extraction fails AFTER the pages are
+    saved (option A). The DB-derived blocks (header, MAR, goals) are intact; the
+    note is an empty but structurally-valid skeleton the DSP fills in manually.
+    extraction_failed=True tells the frontend to prompt for manual entry.
+    """
+    empty_note = {
+        "transcript": "",
+        "activities_performed": [],
+        "activity_timestamps": [],
+        "support_level": "unknown",
+        "individual_response": "",
+        "isp_goals_addressed": [],
+        "confidence": {
+            "activities_performed": 0.0,
+            "activity_timestamps": 0.0,
+            "support_level": 0.0,
+            "individual_response": 0.0,
+        },
+        "gaps_detected": [],
+        "extracted_fields_section2": {
+            "health_observations": None,
+            "behavioral_observations": None,
+            "community_outing": None,
+        },
+    }
+    return {
+        "auto_fields": ctx["auto_fields"],
+        "progress_note": empty_note,
+        "mar_scaffold": _build_mar_scaffold(ctx, ""),
+        "active_goals": _build_active_goals(ctx, []),
+        "meals": [],
+        "personal_care": [],
+        "source_image_uris": stored["uris"],
+        "extraction_failed": True,
+    }
+
+
 async def extract_image(medicaid_id: str, pages: list[tuple[bytes, str]]) -> dict:
     """The image READ path. Loads context, persists the source pages to GCS,
     runs the one vision agent, detects gaps, assembles the result. Performs NO
@@ -254,9 +292,16 @@ async def extract_image(medicaid_id: str, pages: list[tuple[bytes, str]]) -> dic
     shift_date = _dt.date.today().isoformat()
     stored = upload_progress_note_pages(medicaid_id, shift_date, pages)
 
-    # 3. One vision agent reads ALL pages -> the Section-1/2 note shape.
-    with timed("progress_note_llm", logger=log):
-        extraction = await _run_progress_note(ctx["goals_text"], pages)
+    # 3. One vision agent reads ALL pages -> the Section-1/2 note shape. If the
+    #    read fails, the pages are already saved, so degrade to a manual-entry
+    #    shell instead of blocking the DSP (option A).
+    try:
+        with timed("progress_note_llm", logger=log):
+            extraction = await _run_progress_note(ctx["goals_text"], pages)
+    except Exception as exc:
+        log.warning(kv(event="extract_image_degraded", medicaid_id=medicaid_id,
+                       error=type(exc).__name__))
+        return _degraded_result(ctx, stored)
 
     # 4. Split the agent output: the Section 2 observations + the tap-style
     #    meals/personal_care ride OUTSIDE progress_note (matching the voice shape),
@@ -285,6 +330,7 @@ async def extract_image(medicaid_id: str, pages: list[tuple[bytes, str]]) -> dic
         "meals": meals,
         "personal_care": personal_care,
         "source_image_uris": stored["uris"],
+        "extraction_failed": False,
     }
 
     log.info(kv(event="extract_image_done", medicaid_id=medicaid_id,

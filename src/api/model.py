@@ -26,6 +26,8 @@ class ImageExtractResponse(ExtractResponse):
     meals: list[str] = []              # pre-filled from S10 checkboxes (DSP confirms)
     personal_care: list[str] = []      # pre-filled from S11 checkboxes (DSP confirms)
     source_image_uris: list[str] = []  # gs:// URIs of the stored pages, in order
+    extraction_failed: bool = False    # true if the vision read failed; pages are
+                                       # saved and the DSP fills the form manually
 
     
     
