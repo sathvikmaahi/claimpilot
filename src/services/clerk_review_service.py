@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from agents.claim_builder.agent import ClaimFields
-from agents.claim_builder.edi_generator import generate_837p
+from services.edi_generator import generate_837p
 from core.config import Settings
 from sqlalchemy.ext.asyncio import AsyncSession
 

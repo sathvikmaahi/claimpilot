@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.claim_builder.agent import ClaimFields, run_claim_builder
-from agents.claim_builder.edi_generator import generate_837p
+from services.edi_generator import generate_837p
 from api.dependencies import get_db, get_http_client, get_settings
 from core.config import Settings
 from core.exceptions import (
