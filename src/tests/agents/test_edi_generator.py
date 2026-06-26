@@ -34,6 +34,7 @@ def _make_fields(**overrides) -> ClaimFields:
         "service_begin_time": None,
         "service_end_time": None,
         "diagnosis_code": "F70",
+        "waiver_type": "Comprehensive",
         "diagnosis_qualifier": "ABK",
         "place_of_service": "12",
         "claim_filing_indicator": "MC",
@@ -239,3 +240,13 @@ def test_tm_segments_present_when_times_given():
     lines = _lines(service_begin_time="0700", service_end_time="1500")
     assert any(l.startswith("DTP*473*TM*") for l in lines)
     assert any(l.startswith("DTP*474*TM*") for l in lines)
+
+
+def test_waiver_type_is_added_as_note_segment():
+    """
+    Input: waiver_type="Comprehensive".
+    Description: Waiver type must be preserved in the generated EDI as an NTE note.
+    Output: NTE*ADD*WaiverType:Comprehensive~ is present.
+    """
+    lines = _lines(waiver_type="Comprehensive")
+    assert any(l.startswith("NTE*ADD*WaiverType:Comprehensive~") for l in lines)

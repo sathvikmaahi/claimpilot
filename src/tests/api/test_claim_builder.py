@@ -60,6 +60,7 @@ MOCK_FIELDS = ClaimFields(
     procedure_code="T2016",
     procedure_qualifier="HC",
     modifier_1="U1",
+    waiver_type="Comprehensive",
     modifier_2=None,
     modifier_3=None,
     service_units=32,

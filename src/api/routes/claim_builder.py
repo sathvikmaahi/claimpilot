@@ -141,6 +141,7 @@ async def build_claim(
         modifier_2=fields.modifier_2,
         modifier_3=fields.modifier_3,
         service_units=fields.service_units,
+        waiver_type=fields.waiver_type,
         billed_amount=fields.billed_amount,
         taxonomy_code=fields.taxonomy_code,
         notes=fields.notes,
