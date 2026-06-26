@@ -17,7 +17,8 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_db
+from api.dependencies import get_db, get_settings
+from core.config import Settings
 from schemas.claim import ClerkReviewRead, ClerkReviewConfirmRequest, ClaimRead
 from services.clerk_review_service import confirm_claim, get_clerk_review_data
 
@@ -54,6 +55,7 @@ async def confirm_clerk_review(
     claim_id: uuid.UUID,
     request: ClerkReviewConfirmRequest,
     db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> ClaimRead:
     try:
         return await confirm_claim(
@@ -61,6 +63,7 @@ async def confirm_clerk_review(
             clerk_id=request.clerk_id,
             billing_field_overrides=request.billing_field_overrides,
             db=db,
+            settings=settings,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

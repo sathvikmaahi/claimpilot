@@ -18,6 +18,7 @@ from decimal import Decimal
 
 from agents.claim_builder.agent import ClaimFields
 from agents.claim_builder.edi_generator import generate_837p
+from core.config import Settings
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models.claims import Claim, ClaimFieldsRecord
@@ -85,6 +86,7 @@ async def confirm_claim(
     clerk_id: str,
     billing_field_overrides: BillingFieldOverrides | None,
     db: AsyncSession,
+    settings: Settings,
 ) -> ClaimRead:
     claim = await db.get(Claim, claim_id)
     if claim is None:
@@ -119,7 +121,7 @@ async def confirm_claim(
     claim.file_837p_reference = generate_837p(
         fields=updated_fields,
         billing_npi=claim.billing_npi or "",
-        tax_id="",  # Tax ID is required by the EDI generator but not editable at Step 4
+        tax_id=settings.tax_id,
         payer_id=claim.payer_id or "",
         claim_id=claim.claim_id,
     )
