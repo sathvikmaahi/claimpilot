@@ -10,8 +10,6 @@ Stage 2 adds extract() — the read + LLM path. It performs NO database writes.
 """
 
 import json
-import os
-import psycopg2
 import asyncio as _asyncio
 
 from google.adk.runners import InMemoryRunner
@@ -19,7 +17,8 @@ from google.genai import types
 from google.adk.agents.llm_agent import Agent
 
 
-from db.db_context import load_context, insert_care_session, insert_mar_rows, insert_care_session_cur
+from db.db_context import load_context, create_care_session, insert_mar_rows
+from db.voice_session import get_session
 from agents.narrative_extractor.agent import build_narrative_extractor
 from agents.narrative_extractor.detect_gaps import detect_gaps
 from agents.observation_extractor.agent import build_observation_extractor
@@ -313,7 +312,6 @@ def _confidence_value(score) -> str | None:
 
 def _build_care_session_row(approved: dict, ctx: dict, goals_resolution: list[dict] | None = None) -> dict:
     """Map the approved note (Voice Extraction Object) -> a documented_care_sessions row."""
-    from psycopg2.extras import Json
     goals_resolution = goals_resolution or []
     s2 = approved.get("extracted_fields_section2", {}) or {}
 
@@ -351,7 +349,7 @@ def _build_care_session_row(approved: dict, ctx: dict, goals_resolution: list[di
         # Goals — addressed subset now comes from the DSP's resolution, not the AI match.
         "goals_addressed_in_session": addressed_ids,
         # Full per-goal decision (addressed yes/no + note) stored as jsonb.
-        "goals_resolution": Json(goals_resolution),
+        "goals_resolution": goals_resolution,
         # Gaps + confidence.
         "documentation_gap_flags": [g["message"] for g in approved.get("gaps_detected", [])],
         "ai_confidence_rating": _confidence_value(approved.get("confidence", {}).get("activities_performed")),
@@ -418,18 +416,18 @@ def _build_mar_entries(mar_grid: list[dict], meds_raw: list) -> list[dict]:
     return entries
 
 
-def write_mar(cur, care_session_id: str, medicaid_id: str, mar_grid: list[dict]) -> int:
+def write_mar(session, care_session_id: str, medicaid_id: str, mar_grid: list[dict]) -> int:
     """
     Write the approved MAR grid as medication_administration_records rows.
 
     Re-derives meds_raw (real medication_ids) from the DB, resolves each grid
     entry's UUID by name server-side, translates exception codes into stored
-    reasons, and inserts via insert_mar_rows on the caller's cursor (shared
+    reasons, and inserts via insert_mar_rows on the caller's ORM session (shared
     transaction with the progress note). Returns the row count.
     """
     ctx = load_context(medicaid_id)
     entries = _build_mar_entries(mar_grid, ctx["meds_raw"])
-    return insert_mar_rows(cur, care_session_id, entries)
+    return insert_mar_rows(session, care_session_id, entries)
 
 
 
@@ -459,28 +457,26 @@ def write_session(approved: dict, mar_grid: list[dict] | None = None,
     row["meals_provided"] = meals or []
     row["personal_care_activities"] = personal_care or []
 
-    conn = psycopg2.connect(
-        host=os.environ["CLOUD_SQL_HOST"], port=5432, dbname="claimpilot",
-        user="postgres", password=os.environ["CLOUD_SQL_PASSWORD"], sslmode="require")
+    # One ORM session == one transaction. create_care_session + write_mar both
+    # run on it; session.commit() persists both. If anything raises, the `with`
+    # exit closes the session and the uncommitted transaction rolls back —
+    # so it's still note + MAR together or neither.
     try:
-        cur = conn.cursor()
-        care_session_id = insert_care_session_cur(cur, row)        # 1. note -> mints id
-        log.info(kv(event="write_done", doc="PROGRESS_NOTE",
-                    care_session_id=care_session_id))
-        mar_count = write_mar(cur, care_session_id, approved["medicaid_id"], mar_grid)  # 2. MAR on same cursor
-        log.info(kv(event="write_done", doc="MAR",
-                    care_session_id=care_session_id, rows=mar_count))
-        conn.commit()                                              # 3. both or neither
+        with get_session() as session:
+            care_session_id = create_care_session(session, row)    # 1. note -> mints id
+            log.info(kv(event="write_done", doc="PROGRESS_NOTE",
+                        care_session_id=care_session_id))
+            mar_count = write_mar(session, care_session_id, approved["medicaid_id"], mar_grid)  # 2. MAR in same session
+            log.info(kv(event="write_done", doc="MAR",
+                        care_session_id=care_session_id, rows=mar_count))
+            session.commit()                                       # 3. both or neither
         log.info(kv(event="submit_committed", care_session_id=care_session_id,
                     mar_rows=mar_count))
         return {"care_session_id": care_session_id, "mar_rows_written": mar_count}
     except Exception as exc:
-        conn.rollback()   # any failure -> nothing persists
         log.error(kv(event="submit_failed", medicaid_id=approved.get("medicaid_id"),
                      error=type(exc).__name__))
         raise
-    finally:
-        conn.close()
         
         
         
