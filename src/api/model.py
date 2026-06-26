@@ -45,6 +45,7 @@ class SubmitRequest(BaseModel):
     meals: list[str] = []        # tap-only (form S10), never voiced
     personal_care: list[str] = []  # tap-only (form S11), never voiced
     goals_resolution: list[dict] = []  # per-goal decision [{goal_id, addressed, note}]
+    source_image_uris: list[str] = []  # gs:// URIs from /extract_image; empty for voice
 
 
 class SubmitResponse(BaseModel):

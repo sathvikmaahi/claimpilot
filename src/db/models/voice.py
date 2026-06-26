@@ -127,6 +127,9 @@ class DocumentedCareSession(VoiceBase):
     goals_resolution: Mapped[list[dict]] = mapped_column(JSONB)
     documentation_gap_flags: Mapped[list[str]] = mapped_column(ARRAY(Text))
     ai_confidence_rating: Mapped[str | None] = mapped_column(Text)
+    # Provenance: gs:// URIs of the source Progress Note photos when the note
+    # was captured by the image pipeline. NULL for voice-captured sessions.
+    source_image_uris: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     dsp_has_signed: Mapped[bool] = mapped_column(Boolean)
     session_status: Mapped[str] = mapped_column(Text)
 

@@ -572,7 +572,8 @@ def write_mar(session, care_session_id: str, medicaid_id: str, mar_grid: list[di
 def write_session(approved: dict, mar_grid: list[dict] | None = None,
                   meals: list[str] | None = None,
                   personal_care: list[str] | None = None,
-                  goals_resolution: list[dict] | None = None) -> dict:
+                  goals_resolution: list[dict] | None = None,
+                  source_image_uris: list[str] | None = None) -> dict:
     
     """
     Atomically persist a whole shift: the progress note AND its MAR rows in ONE
@@ -594,6 +595,9 @@ def write_session(approved: dict, mar_grid: list[dict] | None = None,
     # Fold in the tap-only fields that don't come from voice.
     row["meals_provided"] = meals or []
     row["personal_care_activities"] = personal_care or []
+    # Link the source photos when the note came from the image pipeline;
+    # voice submits send none, so the column stays NULL.
+    row["source_image_uris"] = source_image_uris or None
 
     # One ORM session == one transaction. create_care_session + write_mar both
     # run on it; session.commit() persists both. If anything raises, the `with`

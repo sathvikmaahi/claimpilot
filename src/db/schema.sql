@@ -113,6 +113,7 @@ CREATE TABLE public.documented_care_sessions (
     checkout_location_longitude numeric(9,6),
     ai_confidence_rating text,  -- agent confidence as a 0.0-1.0 score, stored as text (was High/Medium/Low)
     documentation_gap_flags text[],
+    source_image_uris text[],  -- gs:// URIs of source Progress Note photos (image pipeline); NULL for voice
     dsp_has_signed boolean DEFAULT false NOT NULL,
     session_status text DEFAULT 'in_progress'::text NOT NULL,
     record_created_at timestamp with time zone DEFAULT now() NOT NULL,
