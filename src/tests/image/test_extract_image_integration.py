@@ -47,6 +47,17 @@ def _delete_gcs_upload(uris):
         blob.delete()
 
 
+def _delete_gcs_objects(uris):
+    """Delete specific objects by gs:// URI (cleanup for promoted permanent pages)."""
+    if not uris:
+        return
+    from google.cloud import storage
+    bucket_name = os.environ["GCS_BUCKET"]
+    bucket = storage.Client().bucket(bucket_name)
+    for u in uris:
+        bucket.blob(u[len(f"gs://{bucket_name}/"):]).delete()
+
+
 @pytest.mark.integration
 @pytest.mark.skipif(
     not (_have_pages and _have_db),
@@ -71,8 +82,10 @@ def test_extract_image_live():
 
 @pytest.mark.integration
 @pytest.mark.skipif(not _have_db, reason="Cloud SQL creds missing")
-def test_source_image_uris_linkage():
-    """write_session stores source_image_uris for an image note and NULL for voice."""
+def test_submit_promotes_and_links_source_images():
+    """Submit promotes staging pages to permanent/ and links them; voice stays NULL."""
+    from infra.storage import upload_progress_note_pages
+
     ctx = load_context(LINDA_MEDICAID_ID)
     goals_resolution = [{"goal_id": str(g["goal_id"]), "addressed": True} for g in ctx["goals_raw"]]
 
@@ -88,21 +101,33 @@ def test_source_image_uris_linkage():
         }
 
     img_id = voi_id = None
+    permanent = []
     try:
-        uris = ["gs://b/x/page-1.jpg", "gs://b/x/page-2.jpg"]
-        img_id = write_session(approved(), goals_resolution=goals_resolution, source_image_uris=uris)["care_session_id"]
+        # Upload real staging pages, then submit -> promote (staging -> permanent) -> link.
+        staged = upload_progress_note_pages(
+            LINDA_MEDICAID_ID, "2026-06-26", [(b"p1", "image/jpeg"), (b"p2", "image/jpeg")]
+        )
+        img_id = write_session(approved(), goals_resolution=goals_resolution,
+                               source_image_uris=staged["uris"])["care_session_id"]
         voi_id = write_session(approved(), goals_resolution=goals_resolution)["care_session_id"]
 
         conn = _connect()
         cur = conn.cursor()
         cur.execute("select source_image_uris from documented_care_sessions where care_session_id=%s", (img_id,))
-        assert cur.fetchone()[0] == uris, "image note should store the source URIs"
+        permanent = cur.fetchone()[0]
         cur.execute("select source_image_uris from documented_care_sessions where care_session_id=%s", (voi_id,))
-        assert cur.fetchone()[0] is None, "voice note should leave source_image_uris NULL"
+        voice_stored = cur.fetchone()[0]
         cur.close()
         conn.close()
+
+        bucket = os.environ["GCS_BUCKET"]
+        assert permanent and len(permanent) == 2, "image note should store the promoted URIs"
+        # Stored URIs live under permanent/, not the TTL-expiring staging/.
+        assert all(u[len(f"gs://{bucket}/"):].startswith("permanent/") for u in permanent)
+        assert voice_stored is None, "voice note should leave source_image_uris NULL"
     finally:
         if img_id:
             delete_care_session(img_id)
         if voi_id:
             delete_care_session(voi_id)
+        _delete_gcs_objects(permanent)  # staging originals were moved away by promote

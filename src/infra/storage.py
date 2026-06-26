@@ -2,10 +2,16 @@
 
 The image pipeline saves every uploaded page to GCS so the original paper form
 behind a billed claim is retained and auditable (6-year Medicaid retention).
-One note's pages are grouped under a single {upload_id} folder:
+One note's pages are grouped under a single {upload_id} folder.
 
-    progress-notes/{medicaid_id}/{shift_date}/{upload_id}/page-1.jpg
-                                                          /page-2.jpg
+Two-tier retention so orphaned (never-submitted) uploads don't accumulate:
+  - Uploads land in staging/ — a bucket lifecycle rule (infra/gcs_lifecycle.json)
+    deletes staging objects older than N days, sweeping abandoned uploads.
+  - On /submit, the linked pages are promoted (moved) to permanent/, which has
+    NO TTL, so a billed claim's source photos are retained.
+
+    staging/{medicaid_id}/{shift_date}/{upload_id}/page-1.jpg   (TTL-expiring)
+    permanent/{medicaid_id}/{shift_date}/{upload_id}/page-1.jpg (retained)
 
 Auth is ADC (no keys): storage.Client() picks up the runtime service account on
 Cloud Run, or `gcloud auth application-default login` locally. The bucket name
@@ -22,6 +28,11 @@ from core.observability import get_logger, kv
 from core.exceptions import StorageUnavailableError
 
 log = get_logger("infra.storage")
+
+# Uploaded pages land under staging/ (a TTL lifecycle rule expires un-submitted
+# orphans); on /submit they are promoted to permanent/ for 6-year retention.
+_STAGING_PREFIX = "staging"
+_PERMANENT_PREFIX = "permanent"
 
 # Lazily-created process-wide client. Built on first use (not at import) so the
 # module imports cleanly without credentials/network, mirroring how the rest of
@@ -79,7 +90,7 @@ def upload_progress_note_pages(
     """
     upload_id = uuid.uuid4().hex
     bucket_name = _bucket_name()
-    prefix = f"progress-notes/{medicaid_id}/{shift_date}/{upload_id}"
+    prefix = f"{_STAGING_PREFIX}/{medicaid_id}/{shift_date}/{upload_id}"
     log.info(kv(event="gcs_upload_start", bucket=bucket_name,
                 medicaid_id=medicaid_id, pages=len(pages), upload_id=upload_id))
 
@@ -104,3 +115,40 @@ def upload_progress_note_pages(
 
     log.info(kv(event="gcs_upload_complete", upload_id=upload_id, pages=len(uris)))
     return {"upload_id": upload_id, "uris": uris}
+
+
+def promote_to_permanent(uris: list[str]) -> list[str]:
+    """Move submitted pages from staging/ to permanent/ (called at /submit).
+
+    The source photos of a billed claim must be retained (6-year), so they are
+    copied out of the TTL-expiring staging area into the no-TTL permanent area
+    and the staging originals are removed (a move). Returns the permanent gs://
+    URIs to store on the care-session row, in the same order.
+
+    Idempotent: a URI already under permanent/ is returned unchanged, so a
+    re-submit doesn't fail. Raises StorageUnavailableError on any copy failure.
+    """
+    if not uris:
+        return []
+    bucket_name = _bucket_name()
+    bucket = _get_client().bucket(bucket_name)
+    permanent = []
+    try:
+        for uri in uris:
+            obj = uri[len(f"gs://{bucket_name}/"):]
+            if obj.startswith(f"{_PERMANENT_PREFIX}/"):
+                permanent.append(uri)  # already promoted — leave as-is
+                continue
+            dest = obj.replace(f"{_STAGING_PREFIX}/", f"{_PERMANENT_PREFIX}/", 1)
+            src_blob = bucket.blob(obj)
+            bucket.copy_blob(src_blob, bucket, dest)  # server-side copy, no egress
+            src_blob.delete()                          # move: drop the staging original
+            permanent.append(f"gs://{bucket_name}/{dest}")
+            log.info(kv(event="gcs_promote_done", dst=dest))
+    except Exception as exc:
+        log.error(kv(event="gcs_promote_failed", bucket=bucket_name, error=type(exc).__name__))
+        raise StorageUnavailableError(
+            f"Failed to promote source images to permanent storage in gs://{bucket_name}"
+        ) from exc
+    log.info(kv(event="gcs_promote_complete", pages=len(permanent)))
+    return permanent

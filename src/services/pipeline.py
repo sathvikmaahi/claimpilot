@@ -24,7 +24,7 @@ from agents.narrative_extractor.agent import build_narrative_extractor
 from agents.narrative_extractor.detect_gaps import detect_gaps
 from agents.observation_extractor.agent import build_observation_extractor
 from agents.progress_note_extractor.agent import build_progress_note_extractor
-from infra.storage import upload_progress_note_pages
+from infra.storage import upload_progress_note_pages, promote_to_permanent
 
 from core.observability import get_logger, kv, timed
 
@@ -595,9 +595,10 @@ def write_session(approved: dict, mar_grid: list[dict] | None = None,
     # Fold in the tap-only fields that don't come from voice.
     row["meals_provided"] = meals or []
     row["personal_care_activities"] = personal_care or []
-    # Link the source photos when the note came from the image pipeline;
-    # voice submits send none, so the column stays NULL.
-    row["source_image_uris"] = source_image_uris or None
+    # Link the source photos when the note came from the image pipeline. On
+    # submit they are promoted out of TTL-expiring staging into permanent
+    # storage; the row stores those durable URIs. Voice submits send none -> NULL.
+    row["source_image_uris"] = promote_to_permanent(source_image_uris) if source_image_uris else None
 
     # One ORM session == one transaction. create_care_session + write_mar both
     # run on it; session.commit() persists both. If anything raises, the `with`
