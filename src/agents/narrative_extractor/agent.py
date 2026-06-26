@@ -51,5 +51,7 @@ def build_narrative_extractor(goals_text: str) -> Agent:
     )
 
 
-# Default instance keeps the folder discoverable for `adk run narrative_extractor`.
-root_agent = build_narrative_extractor("(no goals loaded)")
+# A ready default instance under a descriptive name. Production injects the
+# recipient's goals per call via build_narrative_extractor() above; this
+# instance exists for ad-hoc local use, not as a package "root".
+narrative_extractor = build_narrative_extractor("(no goals loaded)")

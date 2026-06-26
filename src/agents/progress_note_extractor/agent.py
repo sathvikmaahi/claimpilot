@@ -68,5 +68,7 @@ def build_progress_note_extractor(goals_text: str) -> Agent:
     )
 
 
-# Default instance keeps the folder discoverable for `adk run progress_note_extractor`.
-root_agent = build_progress_note_extractor("(no goals loaded)")
+# A ready default instance under a descriptive name. Production injects the
+# recipient's goals per call via build_progress_note_extractor() above; this
+# instance exists for ad-hoc local use, not as a package "root".
+progress_note_extractor = build_progress_note_extractor("(no goals loaded)")
