@@ -15,15 +15,15 @@ import datetime as _dt
 
 from google.adk.runners import InMemoryRunner
 from google.genai import types
-from google.adk.agents.llm_agent import Agent
 
 
 from db.db_context import load_context, create_care_session, insert_mar_rows
 from db.voice_session import get_session
 from agents.narrative_extractor.agent import build_narrative_extractor
-from agents.narrative_extractor.detect_gaps import detect_gaps
+from services.detect_gaps import detect_gaps
 from agents.observation_extractor.agent import build_observation_extractor
 from agents.progress_note_extractor.agent import build_progress_note_extractor
+from agents.transcription_agent.agent import transcription_agent
 from infra.storage import upload_progress_note_pages, promote_to_permanent
 
 from core.observability import get_logger, kv, timed
@@ -660,47 +660,20 @@ async def _with_retry(coro_factory, *, attempts: int = 3, base_delay: float = 2.
 # TRANSCRIPTION — (/transcribe)
 # ---------------------------------------------------------------------------
 # A stateless, write-free speech->text service. Used by the frontend for voice
-# notes (e.g. per-goal notes): audio in, plain text out. NO DB, no goals, no
-# extraction schema. The text reaches the DB only later, via /submit inside
-# goals_resolution — /transcribe itself saves nothing.
-
-
-def _build_transcription_agent() -> Agent:
-    """A schema-less agent that faithfully transcribes spoken audio to text.
-
-    Unlike the extractor agents, it returns PLAIN TEXT (no Pydantic schema) and
-    is told NOT to interpret, structure, or embellish — only to write down what
-    was said, lightly cleaning filler. Faithfulness matters: this can become a
-    clinical note supporting Medicaid billing, so no invented content.
-    """
-    return Agent(
-        model="gemini-2.5-flash",
-        name="transcription_agent",
-        description="Faithfully transcribes a short spoken note to text.",
-        instruction=(
-            "You are a transcription service. The user's message is spoken audio. "
-            "Write down exactly what was said, as clean readable text. "
-            "Lightly remove filler words and false starts (um, uh, repeated words), "
-            "but do NOT add, omit, summarize, interpret, or rephrase the content. "
-            "Return only the transcribed text — no preamble, no labels, no commentary."
-        ),
-        # NOTE: no output_schema — this agent returns plain text, not JSON.
-    )
-
-
-# Build once and reuse (the agent is identical for every note).
-_transcription_agent = _build_transcription_agent()
+# notes (e.g. per-goal notes): audio in, text out. NO DB, no goals. The text
+# reaches the DB only later, via /submit inside goals_resolution — /transcribe
+# itself saves nothing. The agent itself lives in agents/transcription_agent.
 
 
 async def transcribe(audio_bytes: bytes, audio_mime: str = "audio/mp4") -> str:
-    """Transcribe one audio clip to plain text. Stateless, no DB writes.
+    """Transcribe one audio clip to text. Stateless, no DB writes.
 
-    Reuses the same runner machinery as the extractors but, because the agent
-    is schema-less, reads the text directly (no json.loads). Wrapped in the
-    429 retry so a transient quota error retries like extraction does.
+    Reuses the same runner machinery as the extractors. The agent returns a
+    JSON object ({"transcript": ...}); we parse out the transcript. Wrapped in
+    the 429 retry so a transient quota error retries like extraction does.
     """
     log.info(kv(event="transcribe_start", bytes=len(audio_bytes)))
-    runner = InMemoryRunner(agent=_transcription_agent, app_name=APP_NAME)
+    runner = InMemoryRunner(agent=transcription_agent, app_name=APP_NAME)
     session = await runner.session_service.create_session(
         app_name=APP_NAME, user_id=USER_ID
     )
@@ -716,7 +689,7 @@ async def transcribe(audio_bytes: bytes, audio_mime: str = "audio/mp4") -> str:
         ):
             if event.is_final_response() and event.content:
                 text = event.content.parts[0].text
-        return text
+        return json.loads(text)["transcript"]
 
     transcript = await _with_retry(_run)
     log.info(kv(event="transcribe_done", chars=len(transcript or "")))
