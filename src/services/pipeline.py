@@ -10,7 +10,6 @@ Stage 2 adds extract() — the read + LLM path. It performs NO database writes.
 """
 
 import json
-import asyncio as _asyncio
 import datetime as _dt
 
 from google.adk.runners import InMemoryRunner
@@ -19,106 +18,18 @@ from google.genai import types
 
 from db.db_context import load_context, create_care_session, insert_mar_rows
 from db.voice_session import get_session
-from agents.narrative_extractor.agent import build_narrative_extractor
 from services.detect_gaps import detect_gaps
-from agents.observation_extractor.agent import build_observation_extractor
-from agents.progress_note_extractor.agent import build_progress_note_extractor
 from agents.transcription_agent.agent import transcription_agent
+from agents.note_extraction_orchestrator.agent import run_extraction
 from infra.storage import upload_progress_note_pages, promote_to_permanent
 
+from core.llm_retry import with_retry
 from core.observability import get_logger, kv, timed
 
 log = get_logger("pipeline")
 
 APP_NAME = "claimpilot_a2"
 USER_ID = "dsp_maria"  # DSP profile (single-user POC)
-
-# Maps a DSP-facing observation toggle -> the key it lands on in the result.
-# Untoggled observations stay None (no agent call for them).
-FIELD_TO_KEY = {
-    "health": "health_observations",
-    "behavioral": "behavioral_observations",
-    "outing": "community_outing",
-}
-
-
-async def _run_agent_on_audio(agent, audio_bytes: bytes, audio_mime: str = "audio/mp4") -> dict:
-    """
-    Run one ADK agent over one audio clip (raw bytes) and return its parsed JSON.
-
-    Takes BYTES, not a path: the API receives uploaded bytes with no file on disk,
-    and the CLI reads its own files and hands the bytes in. One function, two callers.
-    """
-    runner = InMemoryRunner(agent=agent, app_name=APP_NAME)
-    session = await runner.session_service.create_session(
-        app_name=APP_NAME, user_id=USER_ID
-    )
-    message = types.Content(
-        role="user",
-        parts=[types.Part.from_bytes(data=audio_bytes, mime_type=audio_mime)],
-    )
-    async def _run():
-        text = None
-        async for event in runner.run_async(
-            user_id=USER_ID, session_id=session.id, new_message=message
-        ):
-            if event.is_final_response() and event.content:
-                text = event.content.parts[0].text
-        return json.loads(text)
-
-    return await _with_retry(_run)
-
-
-async def _run_section1(goals_text: str, narration_activities: bytes,
-                        narration_engagement: bytes | None = None) -> dict:
-    """
-    Run the Section 1 agent over the narration.
-
-    The DSP speaks in two guided prompts — WHAT they did (narration_activities)
-    and HOW the individual responded (narration_engagement). Both clips feed the
-    SAME verified Section 1 agent in one call; it separates them into the right
-    fields itself (activities_performed vs individual_response). The second clip
-    is optional: a single combined recording (engagement=None) is fully supported,
-    because the agent extracts both signals from whatever audio it's given.
-    """
-    agent = build_narrative_extractor(goals_text)
-    runner = InMemoryRunner(agent=agent, app_name=APP_NAME)
-    session = await runner.session_service.create_session(
-        app_name=APP_NAME, user_id=USER_ID
-    )
-
-    parts = [types.Part.from_bytes(data=narration_activities, mime_type="audio/mp4")]
-    if narration_engagement is not None:
-        parts.append(types.Part.from_bytes(data=narration_engagement, mime_type="audio/mp4"))
-
-    message = types.Content(role="user", parts=parts)
-
-    async def _run():
-        text = None
-        async for event in runner.run_async(
-            user_id=USER_ID, session_id=session.id, new_message=message
-        ):
-            if event.is_final_response() and event.content:
-                text = event.content.parts[0].text
-        return json.loads(text)
-
-    return await _with_retry(_run)
-
-
-async def _run_section2(toggled: dict[str, bytes]) -> dict:
-    """
-    Run one narrow Section 2 agent per toggled observation.
-
-    `toggled` maps field name ("health"/"behavioral"/"outing") -> that clip's bytes.
-    Untoggled fields are absent from the dict and stay None in the result.
-    """
-    result = {key: None for key in FIELD_TO_KEY.values()}  # everything off by default
-    for field, audio_bytes in toggled.items():
-        agent = build_observation_extractor(field)  # build the agent for THIS field
-        extraction = await _run_agent_on_audio(agent, audio_bytes)
-        result[FIELD_TO_KEY[field]] = extraction["value"]
-    return result
-
 
 def _in_shift_window(med_time: str, shift: dict) -> bool:
     """True if a med's scheduled time falls within the shift, inclusive.
@@ -178,20 +89,23 @@ async def extract(medicaid_id: str,
     # 1. One DB read for everything both documents need.
     ctx = load_context(medicaid_id)
 
-    # 2. Section 1 — WHAT + HOW into the verified agent.
-    with timed("narrative_llm", logger=log):
-        section1 = await _run_section1(
-            ctx["goals_text"], narration_activities, narration_engagement
+    # 2. Run the extraction agents via the root orchestrator (voice branch:
+    #    narrative + each toggled observation, fanned out CONCURRENTLY).
+    with timed("voice_extraction_llm", logger=log):
+        extracted = await run_extraction(
+            "voice",
+            goals_text=ctx["goals_text"],
+            narration_activities=narration_activities,
+            narration_engagement=narration_engagement,
+            toggled=toggled,
         )
+    section1 = extracted["section1"]
+    section1["extracted_fields_section2"] = extracted["section2"]
 
     # 3. Gap detection — deterministic Python, fed the DB shift + meds.
     section1["gaps_detected"] = detect_gaps(section1, ctx["shift"], ctx["medications"])
 
-    # 4. Section 2 — one narrow agent per toggle.
-    with timed("observation_llm", logger=log):
-        section1["extracted_fields_section2"] = await _run_section2(toggled)
-
-    # 5. Assemble the response blocks. progress_note is the whole Section 1 object.
+    # 4. Assemble the response blocks. progress_note is the whole Section 1 object.
     result = {
         "auto_fields": ctx["auto_fields"],
         "progress_note": section1,
@@ -205,33 +119,6 @@ async def extract(medicaid_id: str,
                 gaps=len(section1.get("gaps_detected", [])),
                 mar_meds=len(result["mar_scaffold"])))
     return result
-
-
-async def _run_progress_note(goals_text: str, pages: list[tuple[bytes, str]]) -> dict:
-    """Run the single Progress Note vision agent over ALL page images at once.
-
-    `pages` is an ordered list of (image_bytes, mime_type) — page 1 first. They
-    are fed to ONE agent call as ordered image parts (the multi-page form is one
-    document), exactly as _run_section1 feeds two audio clips to one agent.
-    """
-    agent = build_progress_note_extractor(goals_text)
-    runner = InMemoryRunner(agent=agent, app_name=APP_NAME)
-    session = await runner.session_service.create_session(
-        app_name=APP_NAME, user_id=USER_ID
-    )
-    parts = [types.Part.from_bytes(data=data, mime_type=mime) for data, mime in pages]
-    message = types.Content(role="user", parts=parts)
-
-    async def _run():
-        text = None
-        async for event in runner.run_async(
-            user_id=USER_ID, session_id=session.id, new_message=message
-        ):
-            if event.is_final_response() and event.content:
-                text = event.content.parts[0].text
-        return json.loads(text)
-
-    return await _with_retry(_run)
 
 
 def _degraded_result(ctx: dict, stored: dict) -> dict:
@@ -297,7 +184,8 @@ async def extract_image(medicaid_id: str, pages: list[tuple[bytes, str]]) -> dic
     #    shell instead of blocking the DSP (option A).
     try:
         with timed("progress_note_llm", logger=log):
-            extraction = await _run_progress_note(ctx["goals_text"], pages)
+            extracted = await run_extraction("image", goals_text=ctx["goals_text"], pages=pages)
+        extraction = extracted["note"]
     except Exception as exc:
         log.warning(kv(event="extract_image_degraded", medicaid_id=medicaid_id,
                        error=type(exc).__name__))
@@ -625,38 +513,6 @@ def write_session(approved: dict, mar_grid: list[dict] | None = None,
         
         
 
-_RETRYABLE_MARKERS = ("RESOURCE_EXHAUSTED", "429", "quota")
-
-
-def _is_quota_error(exc: Exception) -> bool:
-    """True if the exception looks like a transient quota / rate-limit error.
-    Matches on message text rather than a specific class, so it's robust across
-    ADK/Gemini library versions."""
-    text = f"{type(exc).__name__} {exc}".lower()
-    return any(marker.lower() in text for marker in _RETRYABLE_MARKERS)
-
-
-async def _with_retry(coro_factory, *, attempts: int = 3, base_delay: float = 2.0):
-    """
-    Run an async operation, retrying ONLY on transient quota (429) errors with
-    exponential backoff. Any non-quota error raises immediately (so real bugs
-    aren't masked). Gives up after `attempts` tries.
-
-    coro_factory: a zero-arg callable returning a fresh coroutine each attempt
-    (we can't re-await a spent coroutine, so we rebuild it per try).
-    """
-    for attempt in range(1, attempts + 1):
-        try:
-            return await coro_factory()
-        except Exception as exc:
-            if not _is_quota_error(exc) or attempt == attempts:
-                raise  # not retryable, or out of attempts -> surface it
-            delay = base_delay * (2 ** (attempt - 1))  # 2s, 4s, 8s
-            print(f"⚠  quota error (attempt {attempt}/{attempts}); retrying in {delay:.0f}s")
-            await _asyncio.sleep(delay)
-            
-            
-            
 # TRANSCRIPTION — (/transcribe)
 # ---------------------------------------------------------------------------
 # A stateless, write-free speech->text service. Used by the frontend for voice
@@ -691,6 +547,6 @@ async def transcribe(audio_bytes: bytes, audio_mime: str = "audio/mp4") -> str:
                 text = event.content.parts[0].text
         return json.loads(text)["transcript"]
 
-    transcript = await _with_retry(_run)
+    transcript = await with_retry(_run)
     log.info(kv(event="transcribe_done", chars=len(transcript or "")))
     return (transcript or "").strip()

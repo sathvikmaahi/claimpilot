@@ -60,16 +60,17 @@ def patched(monkeypatch):
     )
 
 
-async def _ok_agent(goals_text, pages):
-    return dict(FULL_EXTRACTION)
+async def _ok_run(modality, **inputs):
+    # mirrors run_extraction's image return: {"note": <flat agent output>}
+    return {"note": dict(FULL_EXTRACTION)}
 
 
-async def _boom_agent(goals_text, pages):
+async def _boom_run(modality, **inputs):
     raise RuntimeError("simulated vision failure")
 
 
 async def test_happy_returns_expected_blocks_and_voice_shape(patched, monkeypatch):
-    monkeypatch.setattr(pipeline, "_run_progress_note", _ok_agent)
+    monkeypatch.setattr(pipeline, "run_extraction", _ok_run)
     res = await pipeline.extract_image("X", PAGES)
 
     assert set(res) == TOP_LEVEL_KEYS
@@ -79,7 +80,7 @@ async def test_happy_returns_expected_blocks_and_voice_shape(patched, monkeypatc
 
 
 async def test_happy_splits_observations_and_taps(patched, monkeypatch):
-    monkeypatch.setattr(pipeline, "_run_progress_note", _ok_agent)
+    monkeypatch.setattr(pipeline, "run_extraction", _ok_run)
     res = await pipeline.extract_image("X", PAGES)
 
     # S7/8/9 fold into extracted_fields_section2 (the contract key).
@@ -94,7 +95,7 @@ async def test_happy_splits_observations_and_taps(patched, monkeypatch):
 
 
 async def test_degraded_on_agent_failure_keeps_saved_pages(patched, monkeypatch):
-    monkeypatch.setattr(pipeline, "_run_progress_note", _boom_agent)
+    monkeypatch.setattr(pipeline, "run_extraction", _boom_run)
     res = await pipeline.extract_image("X", PAGES)
 
     assert res["extraction_failed"] is True
