@@ -1,0 +1,44 @@
+# 837P billing rules for Life Unlimited, Inc. — ISL Residential (T2016) claims.
+#
+# All constants here are read by the Claim Builder agent at runtime.
+# The LLM never invents these values — it reads them from this file.
+
+PROCEDURE_CODE: T2016
+PROCEDURE_CODE_QUALIFIER: HC
+CLAIM_FILING_INDICATOR: MC
+PLACE_OF_SERVICE_CODE: "12"
+FACILITY_CODE_QUALIFIER: B
+CLAIM_FREQUENCY_CODE: "1"
+BILLING_PROVIDER_TAXONOMY: 251G00000X
+SUBSCRIBER_RELATIONSHIP: "18"
+
+VALID_MODIFIERS:
+  U1: "Missouri DD waiver — required on all T2016 ISL claims"
+  U5: "Individual waiver"
+  HQ: "Group setting"
+  TT: "Multi-therapy"
+
+FIELD_MAP:
+  billing_provider_npi: settings.billing_npi
+  billing_provider_ein: settings.tax_id
+  subscriber_medicaid_id: event.participant_dcn
+  subscriber_name: event.participant_name
+  subscriber_dob: event.participant_dob
+  subscriber_sex: event.sex
+  claim_service_date: event.service_date
+  claim_diagnosis_code: event.diagnosis_code
+  claim_billed_amount: "computed: service_units × settings.t2016_fee_schedule_rate"
+  claim_service_units: event.service_units
+  rendering_provider_npi: event.rendering_npi
+  procedure_code: event.procedure_code
+  modifier_1: event.modifier_1
+  modifier_2: event.modifier_2
+  modifier_3: event.modifier_3
+  service_begin_time: event.begin_time
+  service_end_time: event.end_time
+
+DIAGNOSIS_CODE_QUALIFIER: ABK
+ISA_AUTHORIZATION_INFO_QUALIFIER: "00"
+ISA_SECURITY_INFO_QUALIFIER: "00"
+ISA_INTERCHANGE_ID_QUALIFIER: ZZ
+ISA_VERSION: "00501"

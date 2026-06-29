@@ -75,6 +75,7 @@ class ClaimFieldsRecord(Base):
     service_begin_time: Mapped[str | None] = mapped_column(String(4), nullable=True)  # HHMM
     service_end_time: Mapped[str | None] = mapped_column(String(4), nullable=True)
     diagnosis_code: Mapped[str] = mapped_column(Text)
+    waiver_type: Mapped[str] = mapped_column(String(100))
     diagnosis_qualifier: Mapped[str] = mapped_column(String(3))
     place_of_service: Mapped[str] = mapped_column(String(2))
     claim_filing_indicator: Mapped[str] = mapped_column(String(2))

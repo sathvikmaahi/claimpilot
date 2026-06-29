@@ -2,7 +2,7 @@
 Stub — Step 3: Claim Builder (orchestration layer).
 
 Input: Validated EnrichedServiceEvent from Step 2 + Life Unlimited billing config (NPI, Tax ID, payer ID, fee schedule).
-Description: Orchestrates the Claim Builder agent (agents/claim_builder_agent.py) to produce a 837P EDI file.
+Description: Orchestrates the Claim Builder agent (agents/claim_builder/agent.py) to produce a 837P EDI file.
              This service layer handles the lifecycle: creates a draft claims row, invokes the agent,
              updates the row with the generated 837P file reference, and returns a ClaimRead schema.
              The agent performs the actual field mapping and EDI transformations (name splitting,

@@ -121,6 +121,8 @@ def generate_837p(
     segments.append(_seg("CLM", claim_ref, fields.billed_amount, "", "", clm05, "Y", "A", "Y", "I"))
     segments.append(_seg("DTP", "472", "D8", fields.service_date))
     segments.append(_seg("HI", f"{fields.diagnosis_qualifier}{_SE}{fields.diagnosis_code}"))
+    if fields.waiver_type:
+        segments.append(_seg("NTE", "ADD", f"WaiverType:{fields.waiver_type}"))
 
     # Loop 2310B — Rendering Provider
     segments.append(_seg("NM1", "82", "1", last, first, "", "", "", "XX", fields.rendering_npi))

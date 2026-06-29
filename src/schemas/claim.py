@@ -36,3 +36,27 @@ class ClaimRead(BaseModel):
     clerk_reviewed_by: str | None
     clerk_review_timestamp: datetime | None
     created_at: datetime
+
+
+class BillingFieldOverrides(BaseModel):
+    procedure_code: str | None = None
+    modifier_1: str | None = None
+    modifier_2: str | None = None
+    modifier_3: str | None = None
+    service_units: int | None = None
+    billed_amount: str | None = None
+    rendering_npi: str | None = None
+    waiver_type: str | None = None
+    diagnosis_code: str | None = None
+    billing_npi: str | None = None
+    payer_id: str | None = None
+
+
+class ClerkReviewConfirmRequest(BaseModel):
+    clerk_id: str
+    billing_field_overrides: BillingFieldOverrides | None = None
+
+
+class ClerkReviewRead(BaseModel):
+    claim: ClaimRead
+    billing_fields: dict[str, str | int | None]

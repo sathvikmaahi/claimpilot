@@ -43,6 +43,7 @@ class ClaimFields(BaseModel):
     service_begin_time: str | None = Field(description="begin_time as HHMM; null if not recorded")
     service_end_time: str | None = Field(description="end_time as HHMM; null if not recorded")
     diagnosis_code: str = Field(description="ICD-10 diagnosis code")
+    waiver_type: str = Field(description="Waiver type from authorization API — required for T2016 ISL claims")
     diagnosis_qualifier: str = Field(description="From billing_rules — always ABK")
     place_of_service: str = Field(description="From billing_rules — CMS place of service code")
     claim_filing_indicator: str = Field(description="From billing_rules — MC for Medicaid")

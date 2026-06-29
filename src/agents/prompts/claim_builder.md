@@ -27,6 +27,7 @@ Return a JSON object with exactly these fields:
   "service_begin_time": "<begin_time as HHMM, or null if not recorded>",
   "service_end_time": "<end_time as HHMM, or null if not recorded>",
   "diagnosis_code": "<diagnosis_code — ICD-10>",
+  "waiver_type": "<authorization.waiver_type>",
   "diagnosis_qualifier": "<from billing_rules.DIAGNOSIS_CODE_QUALIFIER>",
   "place_of_service": "<from billing_rules.PLACE_OF_SERVICE_CODE>",
   "procedure_code": "<procedure_code from service_event>",
