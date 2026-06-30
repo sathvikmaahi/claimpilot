@@ -42,6 +42,7 @@ def _make_claim_read(claim: Claim) -> ClaimRead:
         payer_id=claim.payer_id or "",
         billed_amount=claim.billed_amount or Decimal("0.00"),
         claim_status=claim.claim_status,
+        validation_results=claim.validation_results,
         file_837p_reference=claim.file_837p_reference,
         clerk_reviewed_by=claim.clerk_reviewed_by,
         clerk_review_timestamp=claim.clerk_review_timestamp,
