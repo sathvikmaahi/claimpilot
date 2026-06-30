@@ -33,6 +33,7 @@ def submit_route(req: SubmitRequest):
             meals=req.meals,
             personal_care=req.personal_care,
             goals_resolution=req.goals_resolution,
+            source_image_uris=req.source_image_uris,
         )
     except IncompleteGoals as exc:
         # Incomplete goal resolution from the client -> actionable 400.

@@ -16,8 +16,8 @@ from services.pipeline import (
     _resolve_goal_ids,
     _resolve_med_id,
     _build_mar_entries,
-    _is_quota_error,
 )
+from core.llm_retry import is_quota_error
 
 
 # ---------------------------------------------------------------------------
@@ -107,13 +107,13 @@ def test_build_mar_entries_translates_exception_code():
 # ---------------------------------------------------------------------------
 
 def test_is_quota_error_recognizes_resource_exhausted():
-    assert _is_quota_error(Exception("something RESOURCE_EXHAUSTED happened")) is True
+    assert is_quota_error(Exception("something RESOURCE_EXHAUSTED happened")) is True
 
 def test_is_quota_error_recognizes_429():
-    assert _is_quota_error(Exception("429 Too Many Requests")) is True
+    assert is_quota_error(Exception("429 Too Many Requests")) is True
 
 def test_is_quota_error_ignores_real_bug():
-    assert _is_quota_error(ValueError("bad audio format")) is False
+    assert is_quota_error(ValueError("bad audio format")) is False
 
 
 # ---------------------------------------------------------------------------

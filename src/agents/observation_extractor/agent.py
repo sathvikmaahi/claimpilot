@@ -36,5 +36,7 @@ def build_observation_extractor(field: str) -> Agent:
     )
 
 
-# Default instance so the folder stays discoverable (`adk run observation_extractor`).
-root_agent = build_observation_extractor("health")
+# A ready default instance under a descriptive name. The orchestrator builds one
+# per toggled field via build_observation_extractor() above; this instance exists
+# for ad-hoc local use, not as a package "root".
+observation_extractor = build_observation_extractor("health")
