@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agents.claim_builder.agent import ClaimFields
 from core.config import Settings
 from db.models.claims import Claim, ClaimFieldsRecord
+from db.models.pipeline_a import CareRecipient, DocumentedCareSession
 from schemas.claim import (
     BillingFieldOverrides,
     ClaimQueueCard,
@@ -78,8 +79,12 @@ def _record_to_claim_fields(record: ClaimFieldsRecord) -> ClaimFields:
 
 async def get_claim_queue(db: AsyncSession) -> ClaimQueueResponse:
     stmt = (
-        select(Claim, ClaimFieldsRecord)
+        select(Claim, ClaimFieldsRecord, CareRecipient.full_name)
         .outerjoin(ClaimFieldsRecord, Claim.claim_id == ClaimFieldsRecord.claim_id)
+        .join(DocumentedCareSession,
+              Claim.service_event_id == DocumentedCareSession.care_session_id)
+        .join(CareRecipient,
+              DocumentedCareSession.care_recipient_id == CareRecipient.care_recipient_id)
         .where(Claim.claim_status.in_(["draft", "failed", "confirmed"]))
         .order_by(Claim.created_at.desc())
     )
@@ -89,7 +94,7 @@ async def get_claim_queue(db: AsyncSession) -> ClaimQueueResponse:
     failed: list[ClaimQueueCard] = []
     confirmed: list[ClaimQueueCard] = []
 
-    for claim, fields in rows:
+    for claim, fields, patient_name in rows:
         card = ClaimQueueCard(
             claim_id=claim.claim_id,
             service_event_id=claim.service_event_id,
@@ -101,6 +106,7 @@ async def get_claim_queue(db: AsyncSession) -> ClaimQueueResponse:
             created_at=claim.created_at,
             clerk_reviewed_by=claim.clerk_reviewed_by,
             clerk_review_timestamp=claim.clerk_review_timestamp,
+            patient_name=patient_name,
             subscriber_last_name=fields.subscriber_last_name if fields else None,
             subscriber_first_name=fields.subscriber_first_name if fields else None,
         )

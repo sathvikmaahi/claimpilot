@@ -76,6 +76,7 @@ class ClaimQueueCard(BaseModel):
     clerk_review_timestamp: datetime | None = None
     subscriber_last_name: str | None = None
     subscriber_first_name: str | None = None
+    patient_name: str | None = None
 
 
 class ClaimQueueResponse(BaseModel):
