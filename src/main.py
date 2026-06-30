@@ -8,7 +8,7 @@ from fastapi import FastAPI
 load_dotenv()
 
 from api.router import router
-from api.routes import fetch, validate, claim_builder, clerk_review
+from api.routes import fetch, validate, claim_builder, clerk_review, process_claims
 from core.logging import setup_logging
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,6 +34,7 @@ app.include_router(fetch.router, prefix="/api/v1", tags=["fetch"])
 app.include_router(validate.router, prefix="/api/v1", tags=["validate"])
 app.include_router(claim_builder.router, prefix="/api/v1", tags=["claim-builder"])
 app.include_router(clerk_review.router, prefix="/api/v1", tags=["clerk-review"])
+app.include_router(process_claims.router, prefix="/api/v1", tags=["process-claims"])
 
 
 # --- Voice agent (Pipeline A) integration -------------------------------------

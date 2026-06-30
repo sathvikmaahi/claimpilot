@@ -26,7 +26,7 @@ from core.exceptions import AuthAPIUnavailableError, DatabaseUnavailableError, S
 from db.models.claims import Claim
 from schemas.service_event import EnrichedServiceEvent
 from services.fetch_service import fetch_service_event
-from services.validation_service import validate_service_event
+from services.validation_service import compute_validation_results, validate_service_event
 
 router = APIRouter()
 
@@ -84,6 +84,7 @@ async def validate_event(
             claim_status="failed",
             validation_failure_check=exc.failures[0].check,
             validation_failure_reason=" | ".join(f.reason for f in exc.failures),
+            validation_results=compute_validation_results(event),
         )
         db.add(failed_claim)
         await db.commit()

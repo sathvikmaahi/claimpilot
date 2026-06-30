@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Numeric, Text, TIMESTAMP, func
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.session import Base
@@ -42,6 +42,9 @@ class Claim(Base):
     # NULL for passing claims — populated when validation fails
     validation_failure_check: Mapped[int | None] = mapped_column(Integer, nullable=True)
     validation_failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Structured results for all 5 checks — list[{check, label, passed, value}]
+    validation_results: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     file_837p_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
     clerk_reviewed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)

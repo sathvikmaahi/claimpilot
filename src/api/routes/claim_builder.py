@@ -28,6 +28,7 @@ from core.exceptions import (
 from db.models.claims import Claim, ClaimFieldsRecord
 from schemas.claim import ClaimRead
 from services.fetch_service import fetch_service_event
+from services.validation_service import compute_validation_results
 
 router = APIRouter()
 
@@ -96,6 +97,7 @@ async def build_claim(
         billing_npi=settings.billing_npi,
         payer_id=settings.payer_id,
         claim_status="draft",
+        validation_results=compute_validation_results(event),
     )
     db.add(claim)
     await db.flush()  # get claim_id without committing

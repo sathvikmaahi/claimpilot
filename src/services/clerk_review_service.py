@@ -16,13 +16,20 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from agents.claim_builder.agent import ClaimFields
-from services.edi_generator import generate_837p
-from core.config import Settings
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agents.claim_builder.agent import ClaimFields
+from core.config import Settings
 from db.models.claims import Claim, ClaimFieldsRecord
-from schemas.claim import BillingFieldOverrides, ClaimRead, ClerkReviewRead
+from schemas.claim import (
+    BillingFieldOverrides,
+    ClaimQueueCard,
+    ClaimQueueResponse,
+    ClaimRead,
+    ClerkReviewRead,
+)
+from services.edi_generator import generate_837p
 
 
 def _make_claim_read(claim: Claim) -> ClaimRead:
@@ -67,6 +74,44 @@ def _record_to_claim_fields(record: ClaimFieldsRecord) -> ClaimFields:
         taxonomy_code=record.taxonomy_code,
         notes=record.notes,
     )
+
+
+async def get_claim_queue(db: AsyncSession) -> ClaimQueueResponse:
+    stmt = (
+        select(Claim, ClaimFieldsRecord)
+        .outerjoin(ClaimFieldsRecord, Claim.claim_id == ClaimFieldsRecord.claim_id)
+        .where(Claim.claim_status.in_(["draft", "failed", "confirmed"]))
+        .order_by(Claim.created_at.desc())
+    )
+    rows = (await db.execute(stmt)).all()
+
+    validated: list[ClaimQueueCard] = []
+    failed: list[ClaimQueueCard] = []
+    confirmed: list[ClaimQueueCard] = []
+
+    for claim, fields in rows:
+        card = ClaimQueueCard(
+            claim_id=claim.claim_id,
+            service_event_id=claim.service_event_id,
+            patient_auth_number=claim.patient_auth_number,
+            claim_status=claim.claim_status,
+            billed_amount=claim.billed_amount,
+            validation_failure_check=claim.validation_failure_check,
+            validation_failure_reason=claim.validation_failure_reason,
+            created_at=claim.created_at,
+            clerk_reviewed_by=claim.clerk_reviewed_by,
+            clerk_review_timestamp=claim.clerk_review_timestamp,
+            subscriber_last_name=fields.subscriber_last_name if fields else None,
+            subscriber_first_name=fields.subscriber_first_name if fields else None,
+        )
+        if claim.claim_status == "draft":
+            validated.append(card)
+        elif claim.claim_status == "failed":
+            failed.append(card)
+        else:
+            confirmed.append(card)
+
+    return ClaimQueueResponse(validated=validated, failed=failed, confirmed=confirmed)
 
 
 async def get_clerk_review_data(claim_id: uuid.UUID, db: AsyncSession) -> ClerkReviewRead:

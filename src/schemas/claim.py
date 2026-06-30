@@ -32,6 +32,7 @@ class ClaimRead(BaseModel):
     payer_id: str
     billed_amount: Decimal
     claim_status: str
+    validation_results: list[dict] | None = None
     file_837p_reference: str | None
     clerk_reviewed_by: str | None
     clerk_review_timestamp: datetime | None
@@ -60,3 +61,30 @@ class ClerkReviewConfirmRequest(BaseModel):
 class ClerkReviewRead(BaseModel):
     claim: ClaimRead
     billing_fields: dict[str, str | int | None]
+
+
+class ClaimQueueCard(BaseModel):
+    claim_id: uuid.UUID
+    service_event_id: uuid.UUID
+    patient_auth_number: str
+    claim_status: str
+    billed_amount: Decimal | None = None
+    validation_failure_check: int | None = None
+    validation_failure_reason: str | None = None
+    created_at: datetime
+    clerk_reviewed_by: str | None = None
+    clerk_review_timestamp: datetime | None = None
+    subscriber_last_name: str | None = None
+    subscriber_first_name: str | None = None
+
+
+class ClaimQueueResponse(BaseModel):
+    validated: list[ClaimQueueCard]
+    failed: list[ClaimQueueCard]
+    confirmed: list[ClaimQueueCard]
+
+
+class ProcessClaimsResult(BaseModel):
+    processed: int
+    draft: int
+    failed: int

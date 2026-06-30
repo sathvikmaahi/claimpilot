@@ -19,10 +19,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_db, get_settings
 from core.config import Settings
-from schemas.claim import ClerkReviewRead, ClerkReviewConfirmRequest, ClaimRead
-from services.clerk_review_service import confirm_claim, get_clerk_review_data
+from schemas.claim import (
+    ClaimQueueResponse,
+    ClaimRead,
+    ClerkReviewConfirmRequest,
+    ClerkReviewRead,
+)
+from services.clerk_review_service import confirm_claim, get_claim_queue, get_clerk_review_data
 
 router = APIRouter()
+
+
+@router.get(
+    "/clerk-review/queue",
+    response_model=ClaimQueueResponse,
+    status_code=200,
+)
+async def get_queue(db: AsyncSession = Depends(get_db)) -> ClaimQueueResponse:
+    return await get_claim_queue(db=db)
 
 
 @router.get(

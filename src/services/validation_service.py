@@ -31,6 +31,89 @@ _REQUIRED_FIELDS: list[tuple[str, str]] = [
 ]
 
 
+def compute_validation_results(event: EnrichedServiceEvent) -> list[dict]:
+    """
+    Runs all 5 checks and returns structured results for storage on the claim row.
+    Does not raise — captures pass/fail + key value for every check.
+    Check 1b is marked skipped (passed=None) when 1a fails, matching validate logic.
+    """
+    auth = event.authorization
+    results: list[dict] = []
+
+    # Check 1a — Auth not expired
+    auth_date_valid = auth.validity_start_date <= event.service_date <= auth.validity_end_date
+    results.append({
+        "check": "1a",
+        "label": "Auth not expired",
+        "passed": auth_date_valid,
+        "value": f"{auth.validity_start_date} – {auth.validity_end_date}",
+    })
+
+    # Check 1b — Units not exhausted (skipped if 1a failed)
+    if auth_date_valid:
+        units_ok = event.service_units <= auth.authorized_units
+        results.append({
+            "check": "1b",
+            "label": "Units not exhausted",
+            "passed": units_ok,
+            "value": f"{event.service_units} of {auth.authorized_units} authorized",
+        })
+    else:
+        results.append({
+            "check": "1b",
+            "label": "Units not exhausted",
+            "passed": None,
+            "value": "Skipped — auth expired",
+        })
+
+    # Check 2 — Service code matches auth
+    code_match = event.procedure_code == auth.authorized_service_code
+    results.append({
+        "check": "2",
+        "label": "Service code matches auth",
+        "passed": code_match,
+        "value": (
+            f"{event.procedure_code} ✓"
+            if code_match
+            else f"Delivered {event.procedure_code}, authorized {auth.authorized_service_code}"
+        ),
+    })
+
+    # Check 3 — Comprehensive enrollment
+    waiver_ok = auth.waiver_type == REQUIRED_WAIVER
+    results.append({
+        "check": "3",
+        "label": "Comprehensive enrollment",
+        "passed": waiver_ok,
+        "value": auth.waiver_type,
+    })
+
+    # Check 4 — EVV GPS present
+    evv = [event.evv_checkin_lat, event.evv_checkin_lng, event.evv_checkout_lat, event.evv_checkout_lng]
+    evv_ok = all(c is not None for c in evv)
+    results.append({
+        "check": "4",
+        "label": "EVV GPS present",
+        "passed": evv_ok,
+        "value": (
+            f"In {event.evv_checkin_lat}° N {event.evv_checkin_lng}° W / "
+            f"Out {event.evv_checkout_lat}° N {event.evv_checkout_lng}° W"
+            if evv_ok else "Check-in or check-out GPS coordinates missing"
+        ),
+    })
+
+    # Check 5 — 837P field completeness
+    missing = [label for field, label in _REQUIRED_FIELDS if not getattr(event, field, None)]
+    results.append({
+        "check": "5",
+        "label": "837P fields complete",
+        "passed": not missing,
+        "value": "All required fields present" if not missing else f"Missing: {', '.join(missing)}",
+    })
+
+    return results
+
+
 async def validate_service_event(event: EnrichedServiceEvent) -> EnrichedServiceEvent:
     """
     Input: EnrichedServiceEvent produced by Step 1.
