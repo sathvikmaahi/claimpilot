@@ -22,7 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agents.claim_builder.agent import ClaimFields
 from core.config import Settings
 from db.models.claims import Claim, ClaimFieldsRecord
-from db.models.pipeline_a import CareRecipient, DocumentedCareSession
+from db.models.pipeline_a import (
+    CareRecipient,
+    DocumentedCareSession,
+    ServiceLocation,
+    StaffShiftAssignment,
+)
 from schemas.claim import (
     BillingFieldOverrides,
     ClaimQueueCard,
@@ -121,13 +126,78 @@ async def get_claim_queue(db: AsyncSession) -> ClaimQueueResponse:
     return ClaimQueueResponse(validated=validated, failed=failed, confirmed=confirmed)
 
 
+async def _pipeline_a_fields(service_event_id: uuid.UUID, db: AsyncSession) -> dict | None:
+    """
+    Fallback for failed claims that have no claim_fields row.
+    Reconstructs SF/BF from Pipeline A tables so the clerk can see what data was present.
+    """
+    stmt = (
+        select(DocumentedCareSession, StaffShiftAssignment, CareRecipient, ServiceLocation)
+        .join(StaffShiftAssignment,
+              DocumentedCareSession.shift_assignment_id == StaffShiftAssignment.shift_assignment_id)
+        .join(CareRecipient,
+              StaffShiftAssignment.care_recipient_id == CareRecipient.care_recipient_id)
+        .join(ServiceLocation,
+              StaffShiftAssignment.location_id == ServiceLocation.location_id)
+        .where(DocumentedCareSession.care_session_id == service_event_id)
+    )
+    row = (await db.execute(stmt)).one_or_none()
+    if row is None:
+        return None
+
+    dcs, ssa, cr, sl = row
+
+    parts = cr.full_name.strip().split()
+    last_name = parts[-1] if parts else ""
+    first_name = " ".join(parts[:-1]) if len(parts) > 1 else None
+
+    dob = cr.date_of_birth.strftime("%Y%m%d") if cr.date_of_birth else ""
+    service_date = ssa.shift_date.strftime("%Y%m%d") if ssa.shift_date else ""
+    begin_time = dcs.actual_clock_in_time.strftime("%H%M") if dcs.actual_clock_in_time else None
+    end_time = dcs.actual_clock_out_time.strftime("%H%M") if dcs.actual_clock_out_time else None
+
+    units = dcs.billable_units_calculated
+    billed = (
+        str((Decimal(units) * Decimal("487.68")).quantize(Decimal("0.01"))) if units else "0.00"
+    )
+
+    return {
+        "subscriber_last_name": last_name,
+        "subscriber_first_name": first_name,
+        "subscriber_medicaid_id": cr.medicaid_id,
+        "subscriber_dob": dob,
+        "subscriber_sex": cr.sex,
+        "service_date": service_date,
+        "service_begin_time": begin_time,
+        "service_end_time": end_time,
+        "diagnosis_code": cr.primary_diagnosis_code,
+        "waiver_type": cr.waiver_program,
+        "diagnosis_qualifier": "ABK",
+        "place_of_service": "12",
+        "claim_filing_indicator": "MC",
+        "rendering_npi": sl.rendering_npi,
+        "procedure_code": ssa.service_billing_code,
+        "procedure_qualifier": "HC",
+        "modifier_1": sl.modifier_1,
+        "modifier_2": sl.modifier_2,
+        "modifier_3": sl.modifier_3,
+        "service_units": units,
+        "billed_amount": billed,
+        "taxonomy_code": "251G00000X",
+        "notes": None,
+    }
+
+
 async def get_clerk_review_data(claim_id: uuid.UUID, db: AsyncSession) -> ClerkReviewRead:
     claim = await db.get(Claim, claim_id)
     if claim is None:
         raise KeyError(f"Claim {claim_id} not found")
 
     record = await db.get(ClaimFieldsRecord, claim_id)
-    billing_fields = _record_to_claim_fields(record).model_dump() if record else None
+    if record is not None:
+        billing_fields = _record_to_claim_fields(record).model_dump()
+    else:
+        billing_fields = await _pipeline_a_fields(claim.service_event_id, db)
 
     return ClerkReviewRead(claim=_make_claim_read(claim), billing_fields=billing_fields)
 
