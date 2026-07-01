@@ -79,6 +79,14 @@ class ClaimQueueCard(BaseModel):
     patient_name: str | None = None
 
 
+class EdiPreviewRequest(BaseModel):
+    billing_field_overrides: BillingFieldOverrides | None = None
+
+
+class EdiPreviewResponse(BaseModel):
+    edi: str
+
+
 class ClaimQueueResponse(BaseModel):
     validated: list[ClaimQueueCard]
     failed: list[ClaimQueueCard]

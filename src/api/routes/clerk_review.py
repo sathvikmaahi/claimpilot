@@ -24,8 +24,15 @@ from schemas.claim import (
     ClaimRead,
     ClerkReviewConfirmRequest,
     ClerkReviewRead,
+    EdiPreviewRequest,
+    EdiPreviewResponse,
 )
-from services.clerk_review_service import confirm_claim, get_claim_queue, get_clerk_review_data
+from services.clerk_review_service import (
+    confirm_claim,
+    get_claim_queue,
+    get_clerk_review_data,
+    preview_edi_for_claim,
+)
 
 router = APIRouter()
 
@@ -53,6 +60,29 @@ async def get_clerk_review(
 ) -> ClerkReviewRead:
     try:
         return await get_clerk_review_data(claim_id=claim_id, db=db)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/clerk-review/{claim_id}/preview-edi",
+    response_model=EdiPreviewResponse,
+    status_code=200,
+)
+async def preview_edi(
+    claim_id: uuid.UUID,
+    request: EdiPreviewRequest,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> EdiPreviewResponse:
+    try:
+        edi = await preview_edi_for_claim(
+            claim_id=claim_id,
+            billing_field_overrides=request.billing_field_overrides,
+            db=db,
+            settings=settings,
+        )
+        return EdiPreviewResponse(edi=edi)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

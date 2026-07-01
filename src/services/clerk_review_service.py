@@ -188,6 +188,35 @@ async def _pipeline_a_fields(service_event_id: uuid.UUID, db: AsyncSession) -> d
     }
 
 
+async def preview_edi_for_claim(
+    claim_id: uuid.UUID,
+    billing_field_overrides,
+    db: AsyncSession,
+    settings: Settings,
+) -> str:
+    claim = await db.get(Claim, claim_id)
+    if claim is None:
+        raise KeyError(f"Claim {claim_id} not found")
+    record = await db.get(ClaimFieldsRecord, claim_id)
+    if record is None:
+        raise KeyError(f"Claim fields for {claim_id} not found")
+
+    fields = _record_to_claim_fields(record)
+    if billing_field_overrides is not None:
+        overrides = billing_field_overrides.model_dump(exclude_none=True)
+        fields_dict = fields.model_dump()
+        fields_dict.update(overrides)
+        fields = ClaimFields(**fields_dict)
+
+    return generate_837p(
+        fields=fields,
+        billing_npi=claim.billing_npi or "",
+        tax_id=settings.tax_id,
+        payer_id=claim.payer_id or "",
+        claim_id=claim.claim_id,
+    )
+
+
 async def get_clerk_review_data(claim_id: uuid.UUID, db: AsyncSession) -> ClerkReviewRead:
     claim = await db.get(Claim, claim_id)
     if claim is None:
