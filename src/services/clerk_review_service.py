@@ -127,10 +127,9 @@ async def get_clerk_review_data(claim_id: uuid.UUID, db: AsyncSession) -> ClerkR
         raise KeyError(f"Claim {claim_id} not found")
 
     record = await db.get(ClaimFieldsRecord, claim_id)
-    if record is None:
-        raise KeyError(f"Claim fields for {claim_id} not found")
+    billing_fields = _record_to_claim_fields(record).model_dump() if record else None
 
-    return ClerkReviewRead(claim=_make_claim_read(claim), billing_fields=_record_to_claim_fields(record).model_dump())
+    return ClerkReviewRead(claim=_make_claim_read(claim), billing_fields=billing_fields)
 
 
 async def confirm_claim(

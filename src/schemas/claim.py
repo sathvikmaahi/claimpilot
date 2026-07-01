@@ -60,7 +60,7 @@ class ClerkReviewConfirmRequest(BaseModel):
 
 class ClerkReviewRead(BaseModel):
     claim: ClaimRead
-    billing_fields: dict[str, str | int | None]
+    billing_fields: dict[str, str | int | None] | None = None
 
 
 class ClaimQueueCard(BaseModel):
