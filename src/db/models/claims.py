@@ -52,6 +52,29 @@ class Claim(Base):
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
+class ClaimRejection(Base):
+    """Pipeline B claim_rejections table — one row per payer rejection event."""
+    __tablename__ = "claim_rejections"
+
+    rejection_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    claim_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("claims.claim_id"), nullable=False)
+    carc_code: Mapped[str] = mapped_column(Text, nullable=False)
+    carc_description: Mapped[str] = mapped_column(Text, nullable=False)
+    rarc_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rarc_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payer_rejection_date: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=False), nullable=False)
+    raw_ra_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+    triage_category: Mapped[str] = mapped_column(String(50), nullable=False, default="untriaged")
+    triage_agent_output: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    resolution_action: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    resolution_status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
+    resubmitted_claim_id: Mapped[uuid.UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("claims.claim_id"), nullable=True)
+    appeal_packet_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class ClaimFieldsRecord(Base):
     """
     Pipeline B claim_fields table — structured 837P fields produced by the Claim Builder agent.

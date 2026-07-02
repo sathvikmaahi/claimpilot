@@ -87,10 +87,71 @@ class EdiPreviewResponse(BaseModel):
     edi: str
 
 
+class RejectedClaimCard(BaseModel):
+    claim_id: uuid.UUID
+    service_event_id: uuid.UUID
+    patient_auth_number: str
+    billed_amount: Decimal | None = None
+    created_at: datetime
+    clerk_reviewed_by: str | None = None
+    subscriber_last_name: str | None = None
+    subscriber_first_name: str | None = None
+    patient_name: str | None = None
+    carc_code: str
+    carc_description: str
+    rarc_code: str | None = None
+    rarc_description: str | None = None
+    payer_rejection_date: datetime
+    raw_ra_reference: str | None = None
+    triage_category: str
+    resolution_status: str
+
+
+class RejectionDetail(BaseModel):
+    rejection_id: uuid.UUID
+    carc_code: str
+    carc_description: str
+    rarc_code: str | None = None
+    rarc_description: str | None = None
+    payer_rejection_date: datetime
+    raw_ra_reference: str | None = None
+    triage_category: str
+    triage_agent_output: dict | None = None
+    resolution_action: str | None = None
+    resolution_status: str
+    resubmitted_claim_id: uuid.UUID | None = None
+    appeal_packet_text: str | None = None
+    resolved_by: str | None = None
+    resolved_at: datetime | None = None
+
+
+class ProgressNoteFields(BaseModel):
+    care_session_narrative: str | None = None
+    activities_performed: list[str] | None = None
+    level_of_support_provided: str | None = None
+    health_observations_notes: str | None = None
+    behavioral_observations_notes: str | None = None
+
+
+class RejectedClaimRead(BaseModel):
+    claim: ClaimRead
+    billing_fields: dict[str, str | int | None] | None = None
+    rejection: RejectionDetail
+    progress_note: ProgressNoteFields | None = None
+
+
+class TriageResponse(BaseModel):
+    triage_category: str
+    confidence: str
+    reasoning: str
+    recommended_action: str
+
+
 class ClaimQueueResponse(BaseModel):
     validated: list[ClaimQueueCard]
     failed: list[ClaimQueueCard]
     confirmed: list[ClaimQueueCard]
+    rejected: list[RejectedClaimCard] = []
 
 
 class ProcessClaimsResult(BaseModel):

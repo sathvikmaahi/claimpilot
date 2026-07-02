@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.claim_builder.agent import ClaimFields
 from core.config import Settings
-from db.models.claims import Claim, ClaimFieldsRecord
+from db.models.claims import Claim, ClaimFieldsRecord, ClaimRejection
 from db.models.pipeline_a import (
     CareRecipient,
     DocumentedCareSession,
@@ -34,6 +34,7 @@ from schemas.claim import (
     ClaimQueueResponse,
     ClaimRead,
     ClerkReviewRead,
+    RejectedClaimCard,
 )
 from services.edi_generator import generate_837p
 
@@ -84,6 +85,7 @@ def _record_to_claim_fields(record: ClaimFieldsRecord) -> ClaimFields:
 
 
 async def get_claim_queue(db: AsyncSession) -> ClaimQueueResponse:
+    # draft / failed / confirmed
     stmt = (
         select(Claim, ClaimFieldsRecord, CareRecipient.full_name)
         .outerjoin(ClaimFieldsRecord, Claim.claim_id == ClaimFieldsRecord.claim_id)
@@ -123,7 +125,45 @@ async def get_claim_queue(db: AsyncSession) -> ClaimQueueResponse:
         else:
             confirmed.append(card)
 
-    return ClaimQueueResponse(validated=validated, failed=failed, confirmed=confirmed)
+    # rejected — join claim_rejections for CARC/triage data
+    rej_stmt = (
+        select(Claim, ClaimFieldsRecord, CareRecipient.full_name, ClaimRejection)
+        .outerjoin(ClaimFieldsRecord, Claim.claim_id == ClaimFieldsRecord.claim_id)
+        .join(DocumentedCareSession,
+              Claim.service_event_id == DocumentedCareSession.care_session_id)
+        .join(CareRecipient,
+              DocumentedCareSession.care_recipient_id == CareRecipient.care_recipient_id)
+        .join(ClaimRejection, Claim.claim_id == ClaimRejection.claim_id)
+        .where(Claim.claim_status == "rejected")
+        .order_by(ClaimRejection.payer_rejection_date.desc())
+    )
+    rej_rows = (await db.execute(rej_stmt)).all()
+
+    rejected: list[RejectedClaimCard] = []
+    for claim, fields, patient_name, rejection in rej_rows:
+        rejected.append(RejectedClaimCard(
+            claim_id=claim.claim_id,
+            service_event_id=claim.service_event_id,
+            patient_auth_number=claim.patient_auth_number,
+            billed_amount=claim.billed_amount,
+            created_at=claim.created_at,
+            clerk_reviewed_by=claim.clerk_reviewed_by,
+            patient_name=patient_name,
+            subscriber_last_name=fields.subscriber_last_name if fields else None,
+            subscriber_first_name=fields.subscriber_first_name if fields else None,
+            carc_code=rejection.carc_code,
+            carc_description=rejection.carc_description,
+            rarc_code=rejection.rarc_code,
+            rarc_description=rejection.rarc_description,
+            payer_rejection_date=rejection.payer_rejection_date,
+            raw_ra_reference=rejection.raw_ra_reference,
+            triage_category=rejection.triage_category,
+            resolution_status=rejection.resolution_status,
+        ))
+
+    return ClaimQueueResponse(
+        validated=validated, failed=failed, confirmed=confirmed, rejected=rejected
+    )
 
 
 async def _pipeline_a_fields(service_event_id: uuid.UUID, db: AsyncSession) -> dict | None:
