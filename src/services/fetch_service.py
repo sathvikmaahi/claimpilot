@@ -135,9 +135,12 @@ async def fetch_service_event(
         ) from exc
 
     # Compute billable units from duration if Pipeline A left it null (15-min units)
+    # Final fallback: 32 units (standard 8-hour shift) when no timing data is present
     service_units = session.billable_units_calculated
     if service_units is None and session.total_duration_minutes:
         service_units = session.total_duration_minutes // 15
+    if not service_units:
+        service_units = 32
 
     # Default EVV GPS to org location if Pipeline A did not populate coordinates
     _ORG_LAT, _ORG_LNG = 39.099728, -94.578568

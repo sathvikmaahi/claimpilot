@@ -203,6 +203,8 @@ async def _pipeline_a_fields(service_event_id: uuid.UUID, db: AsyncSession) -> d
     units = dcs.billable_units_calculated
     if units is None and dcs.total_duration_minutes:
         units = dcs.total_duration_minutes // 15
+    if not units:
+        units = 32
     billed = (
         str((Decimal(units) * Decimal("487.68")).quantize(Decimal("0.01"))) if units else "0.00"
     )
