@@ -1,6 +1,6 @@
 [
   {
-    "patient_name": "Aisha Johnson",
+    "patient_name": "Fizah Johnson",
     "insurance_number": "501837022",
     "patient_prior_auth_number": "AUTH-2026-00201",
     "authorized_units": 96,
@@ -37,6 +37,26 @@
     "validity_start_date": "2026-01-01",
     "validity_end_date": "2026-12-31",
     "authorized_service_code": "T2016",
+    "waiver_type": "Comprehensive"
+  },
+  {
+    "patient_name": "James Carter",
+    "insurance_number": "JC100007",
+    "patient_prior_auth_number": "AUTH-2025-00301",
+    "authorized_units": 96,
+    "validity_start_date": "2025-01-01",
+    "validity_end_date": "2025-12-31",
+    "authorized_service_code": "T2016",
+    "waiver_type": "Comprehensive"
+  },
+  {
+    "patient_name": "Maria Santos",
+    "insurance_number": "MS100008",
+    "patient_prior_auth_number": "AUTH-2026-00302",
+    "authorized_units": 96,
+    "validity_start_date": "2026-01-01",
+    "validity_end_date": "2026-12-31",
+    "authorized_service_code": "T2021",
     "waiver_type": "Comprehensive"
   }
 ]
