@@ -28,7 +28,12 @@ from db.models.pipeline_a import DocumentedCareSession
 from schemas.claim import ProcessClaimsResult
 from services.edi_generator import generate_837p
 from services.fetch_service import fetch_service_event
-from services.validation_service import compute_validation_results, validate_service_event
+from services.validation_service import (
+    check_edi_structural,
+    check_for_duplicate,
+    compute_validation_results,
+    validate_service_event,
+)
 
 
 async def process_all_claims(
@@ -88,6 +93,11 @@ async def process_all_claims(
         db.add(claim)
         await db.flush()
 
+        # Check 6 — Duplicate detection (requires claim_id to exclude current draft)
+        dup_check = await check_for_duplicate(event.service_event_id, claim.claim_id, db)
+        validation_results = list(validation_results) + [dup_check]
+        claim.validation_results = validation_results
+
         try:
             fields: ClaimFields = await run_claim_builder(
                 event=event,
@@ -106,6 +116,11 @@ async def process_all_claims(
             payer_id=settings.payer_id,
             claim_id=claim.claim_id,
         )
+
+        # Check 8 — 837P structural validation on the draft EDI
+        edi_check = check_edi_structural(edi_text)
+        validation_results = list(validation_results) + [edi_check]
+        claim.validation_results = validation_results
         claim_fields_record = ClaimFieldsRecord(
             claim_id=claim.claim_id,
             subscriber_last_name=fields.subscriber_last_name,

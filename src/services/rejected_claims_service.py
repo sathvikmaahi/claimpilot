@@ -27,7 +27,7 @@ async def get_rejected_claim(claim_id: uuid.UUID, db: AsyncSession) -> RejectedC
     claim = await db.get(Claim, claim_id)
     if claim is None:
         raise KeyError(f"Claim {claim_id} not found")
-    if claim.claim_status != "rejected":
+    if claim.claim_status not in ("rejected", "appeal_submitted", "written_off"):
         raise KeyError(f"Claim {claim_id} is not a rejected claim")
 
     rejection = (

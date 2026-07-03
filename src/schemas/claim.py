@@ -105,6 +105,7 @@ class RejectedClaimCard(BaseModel):
     raw_ra_reference: str | None = None
     triage_category: str
     resolution_status: str
+    resolution_action: str | None = None
 
 
 class RejectionDetail(BaseModel):
@@ -158,3 +159,33 @@ class ProcessClaimsResult(BaseModel):
     processed: int
     draft: int
     failed: int
+
+
+class CorrectionResponse(BaseModel):
+    proposed_fields: dict[str, str]
+    reasoning: str
+    confidence: str
+
+
+class ResubmitRequest(BaseModel):
+    clerk_id: str
+    approved_fields: dict[str, str] | None = None  # clerk may trim/override agent proposals
+
+
+class ResubmitResponse(BaseModel):
+    new_claim_id: uuid.UUID
+    claim_status: str
+    edi_snippet: str  # first 500 chars of the generated 837P for confirmation display
+
+
+class PipelineOutput(BaseModel):
+    triage_category: str
+    triage_confidence: str
+    triage_reasoning: str
+    triage_recommended_action: str
+    proposed_fields: dict[str, str] | None = None
+    correction_reasoning: str | None = None
+    correction_confidence: str | None = None
+    appeal_draft: str | None = None
+    appeal_confidence: str | None = None
+    appeal_key_evidence: list[str] | None = None

@@ -28,7 +28,11 @@ from core.exceptions import (
 from db.models.claims import Claim, ClaimFieldsRecord
 from schemas.claim import ClaimRead
 from services.fetch_service import fetch_service_event
-from services.validation_service import compute_validation_results
+from services.validation_service import (
+    check_edi_structural,
+    check_for_duplicate,
+    compute_validation_results,
+)
 
 router = APIRouter()
 
@@ -91,16 +95,22 @@ async def build_claim(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     # 2 — Run the Claim Builder agent
+    validation_results = compute_validation_results(event)
     claim = Claim(
         service_event_id=event.service_event_id,
         patient_auth_number=event.authorization.patient_prior_auth_number,
         billing_npi=settings.billing_npi,
         payer_id=settings.payer_id,
         claim_status="draft",
-        validation_results=compute_validation_results(event),
+        validation_results=validation_results,
     )
     db.add(claim)
     await db.flush()  # get claim_id without committing
+
+    # Check 6 — Duplicate detection (requires claim_id to exclude current draft)
+    dup_check = await check_for_duplicate(event.service_event_id, claim.claim_id, db)
+    validation_results = list(validation_results) + [dup_check]
+    claim.validation_results = validation_results
 
     try:
         fields: ClaimFields = await run_claim_builder(
@@ -122,6 +132,11 @@ async def build_claim(
         payer_id=settings.payer_id,
         claim_id=claim.claim_id,
     )
+
+    # Check 8 — 837P structural validation on the draft EDI
+    edi_check = check_edi_structural(edi_text)
+    validation_results = list(validation_results) + [edi_check]
+    claim.validation_results = validation_results
     claim_fields_record = ClaimFieldsRecord(
         claim_id=claim.claim_id,
         subscriber_last_name=fields.subscriber_last_name,

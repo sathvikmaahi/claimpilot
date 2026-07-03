@@ -2,7 +2,7 @@
 Step 2: Validate.
 
 Input: EnrichedServiceEvent from Step 1 (Fetch).
-Description: Runs 5 validation checks against the enriched service event and collects
+Description: Runs 7 validation checks against the enriched service event and collects
              ALL failures before raising, so the clerk sees every issue in one response.
              Check 1a — Auth not expired: service_date falls within validity_start_date..validity_end_date.
              Check 1b — Units not exhausted: service_units <= authorized_units (CO-151).
@@ -11,12 +11,22 @@ Description: Runs 5 validation checks against the enriched service event and col
              Check 3  — Waiver type: auth API waiver_type is 'Comprehensive' (required for T2016 ISL).
              Check 4  — EVV verification: all 4 GPS coordinates are present.
              Check 5  — Field completeness: all required 837P fields are non-null.
+             Check 7  — Timely filing: service_date is within 365 days of today.
+             Check 6  — Duplicate detection: async helper, called from service layers that have DB.
+             Check 8  — 837P structural: sync helper, called after EDI generation in service layers.
              PASS → returns validated event, caller routes to Step 3 (Claim Builder).
              FAIL → raises ValidationFailedError carrying the full list of failures.
 Output: EnrichedServiceEvent (pass-through) on success, ValidationFailedError on failure.
 """
-from schemas.service_event import EnrichedServiceEvent
+import uuid
+from datetime import date, timedelta
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from core.exceptions import ValidationFailedError, ValidationFailure
+from schemas.service_event import EnrichedServiceEvent
+from services.edi_validator import validate_837p
 
 REQUIRED_WAIVER = "Comprehensive"
 
@@ -111,6 +121,20 @@ def compute_validation_results(event: EnrichedServiceEvent) -> list[dict]:
         "value": "All required fields present" if not missing else f"Missing: {', '.join(missing)}",
     })
 
+    # Check 7 — Timely filing (365-day Missouri Medicaid limit)
+    cutoff = date.today() - timedelta(days=365)
+    filing_ok = event.service_date >= cutoff
+    results.append({
+        "check": "7",
+        "label": "Timely filing",
+        "passed": filing_ok,
+        "value": (
+            f"Service date {event.service_date} is within 365 days"
+            if filing_ok
+            else f"Service date {event.service_date} is more than 365 days ago (cutoff {cutoff})"
+        ),
+    })
+
     return results
 
 
@@ -191,7 +215,74 @@ async def validate_service_event(event: EnrichedServiceEvent) -> EnrichedService
             reason=f"Missing required fields: {', '.join(missing)}",
         ))
 
+    # Check 7 — Timely filing (365-day Missouri Medicaid limit)
+    cutoff = date.today() - timedelta(days=365)
+    if event.service_date < cutoff:
+        failures.append(ValidationFailure(
+            check=7,
+            reason=(
+                f"Timely filing limit exceeded — service date {event.service_date} "
+                f"is more than 365 days ago (cutoff {cutoff}, CO-29)"
+            ),
+        ))
+
     if failures:
         raise ValidationFailedError(failures)
 
     return event
+
+
+async def check_for_duplicate(
+    service_event_id: uuid.UUID,
+    current_claim_id: uuid.UUID,
+    db: AsyncSession,
+) -> dict:
+    """
+    Check 6 — Duplicate detection.
+
+    Returns a validation result dict. Flags if a confirmed or submitted claim already
+    exists for this service_event_id (excluding the claim currently being built).
+    Called from service layers after db.flush() so current_claim_id is known.
+    """
+    from db.models.claims import Claim  # local import to avoid circular dep
+
+    result = await db.execute(
+        select(func.count()).select_from(Claim).where(
+            Claim.service_event_id == service_event_id,
+            Claim.claim_id != current_claim_id,
+            Claim.claim_status.in_(["confirmed", "submitted"]),
+        )
+    )
+    dup_count = result.scalar_one()
+    passed = dup_count == 0
+    return {
+        "check": "6",
+        "label": "No duplicate submission",
+        "passed": passed,
+        "value": (
+            "No prior confirmed or submitted claim for this service event"
+            if passed
+            else f"{dup_count} prior confirmed/submitted claim(s) found for this service event"
+        ),
+    }
+
+
+def check_edi_structural(edi_text: str) -> dict:
+    """
+    Check 8 — 837P structural validation.
+
+    Runs the EDI validator against the generated 837P text.
+    Called from service layers immediately after generate_837p().
+    """
+    errors = validate_837p(edi_text)
+    passed = len(errors) == 0
+    return {
+        "check": "8",
+        "label": "837P structural check",
+        "passed": passed,
+        "value": (
+            "EDI structure is valid"
+            if passed
+            else f"EDI errors: {'; '.join(errors)}"
+        ),
+    }

@@ -13,14 +13,16 @@ Description: Presents the billing clerk with a two-panel view:
 Output: Confirmed ClaimRead with claim_status="confirmed". This is the final output of Pipeline B.
 """
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agents.claim_builder.agent import ClaimFields
 from core.config import Settings
+from core.exceptions import ClaimBuildError
 from db.models.claims import Claim, ClaimFieldsRecord, ClaimRejection
 from db.models.pipeline_a import (
     CareRecipient,
@@ -37,6 +39,7 @@ from schemas.claim import (
     RejectedClaimCard,
 )
 from services.edi_generator import generate_837p
+from services.fetch_service import fetch_service_event
 
 
 def _make_claim_read(claim: Claim) -> ClaimRead:
@@ -134,7 +137,7 @@ async def get_claim_queue(db: AsyncSession) -> ClaimQueueResponse:
         .join(CareRecipient,
               DocumentedCareSession.care_recipient_id == CareRecipient.care_recipient_id)
         .join(ClaimRejection, Claim.claim_id == ClaimRejection.claim_id)
-        .where(Claim.claim_status == "rejected")
+        .where(Claim.claim_status.in_(["rejected", "appeal_submitted", "written_off"]))
         .order_by(ClaimRejection.payer_rejection_date.desc())
     )
     rej_rows = (await db.execute(rej_stmt)).all()
@@ -159,6 +162,7 @@ async def get_claim_queue(db: AsyncSession) -> ClaimQueueResponse:
             raw_ra_reference=rejection.raw_ra_reference,
             triage_category=rejection.triage_category,
             resolution_status=rejection.resolution_status,
+            resolution_action=rejection.resolution_action,
         ))
 
     return ClaimQueueResponse(
@@ -277,6 +281,7 @@ async def confirm_claim(
     billing_field_overrides: BillingFieldOverrides | None,
     db: AsyncSession,
     settings: Settings,
+    http_client: httpx.AsyncClient,
 ) -> ClaimRead:
     claim = await db.get(Claim, claim_id)
     if claim is None:
@@ -285,6 +290,32 @@ async def confirm_claim(
     record = await db.get(ClaimFieldsRecord, claim_id)
     if record is None:
         raise KeyError(f"Claim fields for {claim_id} not found")
+
+    # Check 9 — Auth re-verification at confirm time
+    try:
+        event = await fetch_service_event(
+            service_event_id=claim.service_event_id,
+            db=db,
+            http_client=http_client,
+            auth_api_url=settings.mock_auth_api_url,
+            auth_api_timeout=settings.auth_api_timeout,
+        )
+        auth = event.authorization
+        today = date.today()
+        if not (auth.validity_start_date <= today <= auth.validity_end_date):
+            raise ClaimBuildError(
+                f"Auth re-verification failed: authorization expired "
+                f"(valid {auth.validity_start_date} – {auth.validity_end_date})"
+            )
+        if event.service_units > auth.authorized_units:
+            raise ClaimBuildError(
+                f"Auth re-verification failed: units exhausted "
+                f"({event.service_units} requested, {auth.authorized_units} authorized)"
+            )
+    except ClaimBuildError:
+        raise
+    except Exception:
+        pass  # auth API unavailable — do not block confirm, log is enough
 
     if billing_field_overrides is not None:
         overrides = billing_field_overrides.model_dump(exclude_none=True)

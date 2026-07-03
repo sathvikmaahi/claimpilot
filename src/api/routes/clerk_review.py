@@ -17,7 +17,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_db, get_settings
+from api.dependencies import get_db, get_http_client, get_settings
 from core.config import Settings
 from schemas.claim import (
     ClaimQueueResponse,
@@ -93,6 +93,7 @@ async def preview_edi(
     status_code=200,
     responses={
         404: {"description": "Claim not found for the given claim_id."},
+        422: {"description": "Auth re-verification failed — auth expired or units exhausted."},
     },
 )
 async def confirm_clerk_review(
@@ -100,7 +101,9 @@ async def confirm_clerk_review(
     request: ClerkReviewConfirmRequest,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    http_client=Depends(get_http_client),
 ) -> ClaimRead:
+    from core.exceptions import ClaimBuildError
     try:
         return await confirm_claim(
             claim_id=claim_id,
@@ -108,6 +111,9 @@ async def confirm_clerk_review(
             billing_field_overrides=request.billing_field_overrides,
             db=db,
             settings=settings,
+            http_client=http_client,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ClaimBuildError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
