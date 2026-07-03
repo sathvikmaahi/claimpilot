@@ -134,6 +134,30 @@ async def fetch_service_event(
             f"Mock auth API unreachable at {auth_api_url}: {exc}"
         ) from exc
 
+    # Compute billable units from duration if Pipeline A left it null (15-min units)
+    service_units = session.billable_units_calculated
+    if service_units is None and session.total_duration_minutes:
+        service_units = session.total_duration_minutes // 15
+
+    # Default EVV GPS to org location if Pipeline A did not populate coordinates
+    _ORG_LAT, _ORG_LNG = 39.099728, -94.578568
+    evv_checkin_lat = (
+        float(session.checkin_location_latitude)
+        if session.checkin_location_latitude is not None else _ORG_LAT
+    )
+    evv_checkin_lng = (
+        float(session.checkin_location_longitude)
+        if session.checkin_location_longitude is not None else _ORG_LNG
+    )
+    evv_checkout_lat = (
+        float(session.checkout_location_latitude)
+        if session.checkout_location_latitude is not None else _ORG_LAT
+    )
+    evv_checkout_lng = (
+        float(session.checkout_location_longitude)
+        if session.checkout_location_longitude is not None else _ORG_LNG
+    )
+
     # Derive "HH:MM-HH:MM" activity_time string from actual clock times (UTC)
     if session.actual_clock_in_time and session.actual_clock_out_time:
         activity_time = (
@@ -179,18 +203,18 @@ async def fetch_service_event(
         meal_type=", ".join(session.meals_provided) if session.meals_provided else None,
         personal_care_type=", ".join(session.personal_care_activities) if session.personal_care_activities else None,
 
-        # EVV from documented_care_sessions
-        evv_checkin_lat=float(session.checkin_location_latitude) if session.checkin_location_latitude is not None else None,
-        evv_checkin_lng=float(session.checkin_location_longitude) if session.checkin_location_longitude is not None else None,
-        evv_checkout_lat=float(session.checkout_location_latitude) if session.checkout_location_latitude is not None else None,
-        evv_checkout_lng=float(session.checkout_location_longitude) if session.checkout_location_longitude is not None else None,
+        # EVV from documented_care_sessions (defaults to org coords if Pipeline A omitted them)
+        evv_checkin_lat=evv_checkin_lat,
+        evv_checkin_lng=evv_checkin_lng,
+        evv_checkout_lat=evv_checkout_lat,
+        evv_checkout_lng=evv_checkout_lng,
         evv_caregiver_id=None,  # not in schema.sql
 
         # billing metadata
         diagnosis_code=recipient.primary_diagnosis_code,
         waiver_identifier=recipient.waiver_program,
         duration_minutes=session.total_duration_minutes or 0,
-        service_units=session.billable_units_calculated or 0,
+        service_units=service_units or 0,
         authorization_number=None,  # not in schema.sql
         flags=[{"message": f} for f in (session.documentation_gap_flags or [])],
         overall_confidence=session.ai_confidence_rating or "Medium",
