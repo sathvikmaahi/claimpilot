@@ -35,3 +35,8 @@ class ClaimBuildError(Exception):
 
 class DatabaseUnavailableError(Exception):
     """Raised when a Cloud SQL query fails due to a connection or driver-level error."""
+
+
+class StorageUnavailableError(Exception):
+    """Raised when a Cloud Storage upload fails (bucket/connection/permission error).
+    Carries no PHI — the message names the bucket/object, never the image content."""

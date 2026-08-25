@@ -15,7 +15,20 @@ class ExtractResponse(BaseModel):
     progress_note: dict        # the LLM-authored editable note
     mar_scaffold: list[dict]   # the DB-prefilled med grid the DSP taps
     active_goals: list[dict]   # every active goal, for the resolution checklist
- 
+
+
+class ImageExtractResponse(ExtractResponse):
+    """What POST /extract_image returns: the same four blocks as /extract, plus
+    the fields only the photographed form carries. meals/personal_care are the
+    S10/S11 checkbox pre-fills the DSP confirms; source_image_uris are the stored
+    page photos, carried to /submit so the saved claim points at its source form.
+    """
+    meals: list[str] = []              # pre-filled from S10 checkboxes (DSP confirms)
+    personal_care: list[str] = []      # pre-filled from S11 checkboxes (DSP confirms)
+    source_image_uris: list[str] = []  # gs:// URIs of the stored pages, in order
+    extraction_failed: bool = False    # true if the vision read failed; pages are
+                                       # saved and the DSP fills the form manually
+
     
     
     
@@ -32,6 +45,7 @@ class SubmitRequest(BaseModel):
     meals: list[str] = []        # tap-only (form S10), never voiced
     personal_care: list[str] = []  # tap-only (form S11), never voiced
     goals_resolution: list[dict] = []  # per-goal decision [{goal_id, addressed, note}]
+    source_image_uris: list[str] = []  # gs:// URIs from /extract_image; empty for voice
 
 
 class SubmitResponse(BaseModel):

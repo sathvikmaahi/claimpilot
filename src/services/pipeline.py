@@ -10,112 +10,26 @@ Stage 2 adds extract() — the read + LLM path. It performs NO database writes.
 """
 
 import json
-import asyncio as _asyncio
+import datetime as _dt
 
 from google.adk.runners import InMemoryRunner
 from google.genai import types
-from google.adk.agents.llm_agent import Agent
 
 
 from db.db_context import load_context, create_care_session, insert_mar_rows
 from db.voice_session import get_session
-from agents.narrative_extractor.agent import build_narrative_extractor
-from agents.narrative_extractor.detect_gaps import detect_gaps
-from agents.observation_extractor.agent import build_observation_extractor
+from services.detect_gaps import detect_gaps
+from agents.transcription_agent.agent import transcription_agent
+from agents.note_extraction_orchestrator.agent import run_extraction
+from infra.storage import upload_progress_note_pages, promote_to_permanent
 
+from core.llm_retry import with_retry
 from core.observability import get_logger, kv, timed
 
 log = get_logger("pipeline")
 
 APP_NAME = "claimpilot_a2"
 USER_ID = "dsp_maria"  # DSP profile (single-user POC)
-
-# Maps a DSP-facing observation toggle -> the key it lands on in the result.
-# Untoggled observations stay None (no agent call for them).
-FIELD_TO_KEY = {
-    "health": "health_observations",
-    "behavioral": "behavioral_observations",
-    "outing": "community_outing",
-}
-
-
-async def _run_agent_on_audio(agent, audio_bytes: bytes, audio_mime: str = "audio/mp4") -> dict:
-    """
-    Run one ADK agent over one audio clip (raw bytes) and return its parsed JSON.
-
-    Takes BYTES, not a path: the API receives uploaded bytes with no file on disk,
-    and the CLI reads its own files and hands the bytes in. One function, two callers.
-    """
-    runner = InMemoryRunner(agent=agent, app_name=APP_NAME)
-    session = await runner.session_service.create_session(
-        app_name=APP_NAME, user_id=USER_ID
-    )
-    message = types.Content(
-        role="user",
-        parts=[types.Part.from_bytes(data=audio_bytes, mime_type=audio_mime)],
-    )
-    async def _run():
-        text = None
-        async for event in runner.run_async(
-            user_id=USER_ID, session_id=session.id, new_message=message
-        ):
-            if event.is_final_response() and event.content:
-                text = event.content.parts[0].text
-        return json.loads(text)
-
-    return await _with_retry(_run)
-
-
-async def _run_section1(goals_text: str, narration_activities: bytes,
-                        narration_engagement: bytes | None = None) -> dict:
-    """
-    Run the Section 1 agent over the narration.
-
-    The DSP speaks in two guided prompts — WHAT they did (narration_activities)
-    and HOW the individual responded (narration_engagement). Both clips feed the
-    SAME verified Section 1 agent in one call; it separates them into the right
-    fields itself (activities_performed vs individual_response). The second clip
-    is optional: a single combined recording (engagement=None) is fully supported,
-    because the agent extracts both signals from whatever audio it's given.
-    """
-    agent = build_narrative_extractor(goals_text)
-    runner = InMemoryRunner(agent=agent, app_name=APP_NAME)
-    session = await runner.session_service.create_session(
-        app_name=APP_NAME, user_id=USER_ID
-    )
-
-    parts = [types.Part.from_bytes(data=narration_activities, mime_type="audio/mp4")]
-    if narration_engagement is not None:
-        parts.append(types.Part.from_bytes(data=narration_engagement, mime_type="audio/mp4"))
-
-    message = types.Content(role="user", parts=parts)
-
-    async def _run():
-        text = None
-        async for event in runner.run_async(
-            user_id=USER_ID, session_id=session.id, new_message=message
-        ):
-            if event.is_final_response() and event.content:
-                text = event.content.parts[0].text
-        return json.loads(text)
-
-    return await _with_retry(_run)
-
-
-async def _run_section2(toggled: dict[str, bytes]) -> dict:
-    """
-    Run one narrow Section 2 agent per toggled observation.
-
-    `toggled` maps field name ("health"/"behavioral"/"outing") -> that clip's bytes.
-    Untoggled fields are absent from the dict and stay None in the result.
-    """
-    result = {key: None for key in FIELD_TO_KEY.values()}  # everything off by default
-    for field, audio_bytes in toggled.items():
-        agent = build_observation_extractor(field)  # build the agent for THIS field
-        extraction = await _run_agent_on_audio(agent, audio_bytes)
-        result[FIELD_TO_KEY[field]] = extraction["value"]
-    return result
-
 
 def _in_shift_window(med_time: str, shift: dict) -> bool:
     """True if a med's scheduled time falls within the shift, inclusive.
@@ -175,20 +89,23 @@ async def extract(medicaid_id: str,
     # 1. One DB read for everything both documents need.
     ctx = load_context(medicaid_id)
 
-    # 2. Section 1 — WHAT + HOW into the verified agent.
-    with timed("narrative_llm", logger=log):
-        section1 = await _run_section1(
-            ctx["goals_text"], narration_activities, narration_engagement
+    # 2. Run the extraction agents via the root orchestrator (voice branch:
+    #    narrative + each toggled observation, fanned out CONCURRENTLY).
+    with timed("voice_extraction_llm", logger=log):
+        extracted = await run_extraction(
+            "voice",
+            goals_text=ctx["goals_text"],
+            narration_activities=narration_activities,
+            narration_engagement=narration_engagement,
+            toggled=toggled,
         )
+    section1 = extracted["section1"]
+    section1["extracted_fields_section2"] = extracted["section2"]
 
     # 3. Gap detection — deterministic Python, fed the DB shift + meds.
     section1["gaps_detected"] = detect_gaps(section1, ctx["shift"], ctx["medications"])
 
-    # 4. Section 2 — one narrow agent per toggle.
-    with timed("observation_llm", logger=log):
-        section1["extracted_fields_section2"] = await _run_section2(toggled)
-
-    # 5. Assemble the response blocks. progress_note is the whole Section 1 object.
+    # 4. Assemble the response blocks. progress_note is the whole Section 1 object.
     result = {
         "auto_fields": ctx["auto_fields"],
         "progress_note": section1,
@@ -202,8 +119,117 @@ async def extract(medicaid_id: str,
                 gaps=len(section1.get("gaps_detected", [])),
                 mar_meds=len(result["mar_scaffold"])))
     return result
-    
-    
+
+
+def _degraded_result(ctx: dict, stored: dict) -> dict:
+    """Build a usable review screen when extraction fails AFTER the pages are
+    saved (option A). The DB-derived blocks (header, MAR, goals) are intact; the
+    note is an empty but structurally-valid skeleton the DSP fills in manually.
+    extraction_failed=True tells the frontend to prompt for manual entry.
+    """
+    empty_note = {
+        "transcript": "",
+        "activities_performed": [],
+        "activity_timestamps": [],
+        "support_level": "unknown",
+        "individual_response": "",
+        "isp_goals_addressed": [],
+        "confidence": {
+            "activities_performed": 0.0,
+            "activity_timestamps": 0.0,
+            "support_level": 0.0,
+            "individual_response": 0.0,
+        },
+        "gaps_detected": [],
+        "extracted_fields_section2": {
+            "health_observations": None,
+            "behavioral_observations": None,
+            "community_outing": None,
+        },
+    }
+    return {
+        "auto_fields": ctx["auto_fields"],
+        "progress_note": empty_note,
+        "mar_scaffold": _build_mar_scaffold(ctx, ""),
+        "active_goals": _build_active_goals(ctx, []),
+        "meals": [],
+        "personal_care": [],
+        "source_image_uris": stored["uris"],
+        "extraction_failed": True,
+    }
+
+
+async def extract_image(medicaid_id: str, pages: list[tuple[bytes, str]]) -> dict:
+    """The image READ path. Loads context, persists the source pages to GCS,
+    runs the one vision agent, detects gaps, assembles the result. Performs NO
+    database writes (the care-session write still happens later via /submit).
+
+    Mirrors extract() so the frontend renders the SAME review form: returns the
+    same four blocks (auto_fields, progress_note, mar_scaffold, active_goals)
+    plus meals/personal_care (pre-filled from the form's S10/S11 checkboxes) and
+    source_image_uris (the stored pages, for linkage at /submit).
+    """
+    log.info(kv(event="extract_image_start", medicaid_id=medicaid_id, pages=len(pages)))
+
+    # 1. One DB read for everything both documents need (header, goals, meds, shift).
+    ctx = load_context(medicaid_id)
+
+    # 2. Persist the source pages FIRST, so the original paper form is retained
+    #    even if extraction later fails. The shift is today's (DB filters current_date).
+    shift_date = _dt.date.today().isoformat()
+    stored = upload_progress_note_pages(medicaid_id, shift_date, pages)
+
+    # 3. One vision agent reads ALL pages -> the Section-1/2 note shape. If the
+    #    read fails, the pages are already saved, so degrade to a manual-entry
+    #    shell instead of blocking the DSP (option A).
+    try:
+        with timed("progress_note_llm", logger=log):
+            extracted = await run_extraction("image", goals_text=ctx["goals_text"], pages=pages)
+        extraction = extracted["note"]
+    except Exception as exc:
+        log.warning(kv(event="extract_image_degraded", medicaid_id=medicaid_id,
+                       error=type(exc).__name__))
+        return _degraded_result(ctx, stored)
+
+    # 4. Split the agent output: the Section 2 observations + the tap-style
+    #    meals/personal_care ride OUTSIDE progress_note (matching the voice shape),
+    #    everything else IS the progress_note (same fields as narrative_extractor).
+    section2 = {
+        "health_observations": extraction.pop("health_observations", None),
+        "behavioral_observations": extraction.pop("behavioral_observations", None),
+        "community_outing": extraction.pop("community_outing", None),
+    }
+    meals = extraction.pop("meals", []) or []
+    personal_care = extraction.pop("personal_care", []) or []
+    section1 = extraction
+
+    # 5. Gap detection — the same deterministic Python the voice path uses.
+    section1["gaps_detected"] = detect_gaps(section1, ctx["shift"], ctx["medications"])
+
+    # 6. Fold observations into the contract key the frontend + /submit expect.
+    section1["extracted_fields_section2"] = section2
+
+    # 7. Assemble — the four voice blocks, plus meals/personal_care + stored URIs.
+    result = {
+        "auto_fields": ctx["auto_fields"],
+        "progress_note": section1,
+        "mar_scaffold": _build_mar_scaffold(ctx, section1.get("transcript", "")),
+        "active_goals": _build_active_goals(ctx, section1.get("isp_goals_addressed", [])),
+        "meals": meals,
+        "personal_care": personal_care,
+        "source_image_uris": stored["uris"],
+        "extraction_failed": False,
+    }
+
+    log.info(kv(event="extract_image_done", medicaid_id=medicaid_id,
+                activities=len(section1.get("activities_performed", [])),
+                goals=len(section1.get("isp_goals_addressed", [])),
+                gaps=len(section1.get("gaps_detected", [])),
+                mar_meds=len(result["mar_scaffold"]),
+                pages=len(stored["uris"])))
+    return result
+
+
 def _build_active_goals(ctx: dict, matched_goals: list) -> list[dict]:
     """Build the full active-goal list for the frontend's resolution checklist.
 
@@ -434,7 +460,8 @@ def write_mar(session, care_session_id: str, medicaid_id: str, mar_grid: list[di
 def write_session(approved: dict, mar_grid: list[dict] | None = None,
                   meals: list[str] | None = None,
                   personal_care: list[str] | None = None,
-                  goals_resolution: list[dict] | None = None) -> dict:
+                  goals_resolution: list[dict] | None = None,
+                  source_image_uris: list[str] | None = None) -> dict:
     
     """
     Atomically persist a whole shift: the progress note AND its MAR rows in ONE
@@ -456,6 +483,10 @@ def write_session(approved: dict, mar_grid: list[dict] | None = None,
     # Fold in the tap-only fields that don't come from voice.
     row["meals_provided"] = meals or []
     row["personal_care_activities"] = personal_care or []
+    # Link the source photos when the note came from the image pipeline. On
+    # submit they are promoted out of TTL-expiring staging into permanent
+    # storage; the row stores those durable URIs. Voice submits send none -> NULL.
+    row["source_image_uris"] = promote_to_permanent(source_image_uris) if source_image_uris else None
 
     # One ORM session == one transaction. create_care_session + write_mar both
     # run on it; session.commit() persists both. If anything raises, the `with`
@@ -482,82 +513,23 @@ def write_session(approved: dict, mar_grid: list[dict] | None = None,
         
         
 
-_RETRYABLE_MARKERS = ("RESOURCE_EXHAUSTED", "429", "quota")
-
-
-def _is_quota_error(exc: Exception) -> bool:
-    """True if the exception looks like a transient quota / rate-limit error.
-    Matches on message text rather than a specific class, so it's robust across
-    ADK/Gemini library versions."""
-    text = f"{type(exc).__name__} {exc}".lower()
-    return any(marker.lower() in text for marker in _RETRYABLE_MARKERS)
-
-
-async def _with_retry(coro_factory, *, attempts: int = 3, base_delay: float = 2.0):
-    """
-    Run an async operation, retrying ONLY on transient quota (429) errors with
-    exponential backoff. Any non-quota error raises immediately (so real bugs
-    aren't masked). Gives up after `attempts` tries.
-
-    coro_factory: a zero-arg callable returning a fresh coroutine each attempt
-    (we can't re-await a spent coroutine, so we rebuild it per try).
-    """
-    for attempt in range(1, attempts + 1):
-        try:
-            return await coro_factory()
-        except Exception as exc:
-            if not _is_quota_error(exc) or attempt == attempts:
-                raise  # not retryable, or out of attempts -> surface it
-            delay = base_delay * (2 ** (attempt - 1))  # 2s, 4s, 8s
-            print(f"⚠  quota error (attempt {attempt}/{attempts}); retrying in {delay:.0f}s")
-            await _asyncio.sleep(delay)
-            
-            
-            
 # TRANSCRIPTION — (/transcribe)
 # ---------------------------------------------------------------------------
 # A stateless, write-free speech->text service. Used by the frontend for voice
-# notes (e.g. per-goal notes): audio in, plain text out. NO DB, no goals, no
-# extraction schema. The text reaches the DB only later, via /submit inside
-# goals_resolution — /transcribe itself saves nothing.
-
-
-def _build_transcription_agent() -> Agent:
-    """A schema-less agent that faithfully transcribes spoken audio to text.
-
-    Unlike the extractor agents, it returns PLAIN TEXT (no Pydantic schema) and
-    is told NOT to interpret, structure, or embellish — only to write down what
-    was said, lightly cleaning filler. Faithfulness matters: this can become a
-    clinical note supporting Medicaid billing, so no invented content.
-    """
-    return Agent(
-        model="gemini-2.5-flash",
-        name="transcription_agent",
-        description="Faithfully transcribes a short spoken note to text.",
-        instruction=(
-            "You are a transcription service. The user's message is spoken audio. "
-            "Write down exactly what was said, as clean readable text. "
-            "Lightly remove filler words and false starts (um, uh, repeated words), "
-            "but do NOT add, omit, summarize, interpret, or rephrase the content. "
-            "Return only the transcribed text — no preamble, no labels, no commentary."
-        ),
-        # NOTE: no output_schema — this agent returns plain text, not JSON.
-    )
-
-
-# Build once and reuse (the agent is identical for every note).
-_transcription_agent = _build_transcription_agent()
+# notes (e.g. per-goal notes): audio in, text out. NO DB, no goals. The text
+# reaches the DB only later, via /submit inside goals_resolution — /transcribe
+# itself saves nothing. The agent itself lives in agents/transcription_agent.
 
 
 async def transcribe(audio_bytes: bytes, audio_mime: str = "audio/mp4") -> str:
-    """Transcribe one audio clip to plain text. Stateless, no DB writes.
+    """Transcribe one audio clip to text. Stateless, no DB writes.
 
-    Reuses the same runner machinery as the extractors but, because the agent
-    is schema-less, reads the text directly (no json.loads). Wrapped in the
-    429 retry so a transient quota error retries like extraction does.
+    Reuses the same runner machinery as the extractors. The agent returns a
+    JSON object ({"transcript": ...}); we parse out the transcript. Wrapped in
+    the 429 retry so a transient quota error retries like extraction does.
     """
     log.info(kv(event="transcribe_start", bytes=len(audio_bytes)))
-    runner = InMemoryRunner(agent=_transcription_agent, app_name=APP_NAME)
+    runner = InMemoryRunner(agent=transcription_agent, app_name=APP_NAME)
     session = await runner.session_service.create_session(
         app_name=APP_NAME, user_id=USER_ID
     )
@@ -573,8 +545,8 @@ async def transcribe(audio_bytes: bytes, audio_mime: str = "audio/mp4") -> str:
         ):
             if event.is_final_response() and event.content:
                 text = event.content.parts[0].text
-        return text
+        return json.loads(text)["transcript"]
 
-    transcript = await _with_retry(_run)
+    transcript = await with_retry(_run)
     log.info(kv(event="transcribe_done", chars=len(transcript or "")))
     return (transcript or "").strip()
